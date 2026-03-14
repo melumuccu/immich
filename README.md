@@ -1,21 +1,21 @@
 # immich
 
-## Docker Compose setup for Mac Studio hybrid storage
+## Mac Studio 向け Docker Compose 構成
 
-This repository includes a minimal Docker Compose setup for running Immich with:
+このリポジトリには、Immich を次のハイブリッド構成で動かすための最小限の Docker Compose 設定が含まれています。
 
-- the **internal SSD** storing PostgreSQL data, thumbnails, profile data, encoded video cache, and ML cache
-- the **external HDD** storing the original photo/video library
+- **内蔵 SSD**: PostgreSQL のデータ、サムネイル、プロフィールデータ、エンコード済み動画キャッシュ、ML キャッシュを保存
+- **外付け HDD**: 写真・動画のオリジナルデータを保存
 
-### Files
+### 含まれるファイル
 
-- `.env`: environment variables and host-side mount paths
-- `docker-compose.yml`: a hybrid mount layout that keeps hot data on the SSD and large library data on the external drive
+- `.env`: 環境変数とホスト側のマウントパス
+- `docker-compose.yml`: 高速アクセスしたいデータを SSD に、大容量のライブラリデータを外付けドライブに配置するハイブリッドマウント構成
 
-### Validate the configuration
+### 設定の確認方法
 
 ```bash
 docker compose config
 ```
 
-If you use a different macOS username or volume name, update the paths in `.env` first.
+macOS のユーザー名や外付けボリューム名が異なる場合は、先に `.env` のパスを書き換えてください。
