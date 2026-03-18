@@ -1,0 +1,51 @@
+services:
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION}
+    environment:
+      TZ: ${TZ}
+      DB_HOSTNAME: database
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_DATABASE_NAME: ${DB_DATABASE_NAME}
+      REDIS_HOSTNAME: redis
+    ports:
+      - "2283:2283"
+    volumes:
+      - ${LIBRARY_PATH}:/usr/src/app/upload/library
+      - ${THUMBNAILS_PATH}:/usr/src/app/upload/thumbs
+      - ${PROFILE_PATH}:/usr/src/app/upload/profile
+      - ${VIDEO_CACHE_PATH}:/usr/src/app/upload/encoded-video
+      - ${UPLOAD_BACKUP_PATH}:/usr/src/app/upload/backups
+    depends_on:
+      - redis
+      - database
+      - immich-machine-learning
+    restart: unless-stopped
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:${IMMICH_VERSION}
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${ML_CACHE_PATH}:/cache
+    restart: unless-stopped
+
+  redis:
+    container_name: immich_redis
+    image: docker.io/redis:7-alpine
+    restart: unless-stopped
+
+  database:
+    container_name: immich_postgres
+    image: docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      TZ: ${TZ}
+    volumes:
+      - ${POSTGRES_DATA_PATH}:/var/lib/postgresql/data
+    restart: unless-stopped
