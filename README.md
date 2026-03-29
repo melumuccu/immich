@@ -2,20 +2,33 @@
 
 ## Mac Studio 向け Docker Compose 構成
 
-このリポジトリには、Immich を次のハイブリッド構成で動かすための最小限の Docker Compose 設定が含まれています。
+Mac Studio 上で Immich を動かすための最小構成。保存先はハイブリッド構成。
 
-- **内蔵 SSD**: PostgreSQL のデータ、サムネイル、プロフィールデータ、エンコード済み動画キャッシュ、ML キャッシュを保存
-- **外付け HDD**: 写真・動画のオリジナルデータを保存
+### ストレージ構成
 
-### 含まれるファイル
+- **内蔵 SSD**: PostgreSQL データ、一時アップロード領域、サムネイル、プロフィールデータ、エンコード済み動画キャッシュ、バックアップ、ML キャッシュ
+- **外付け HDD**: 写真・動画のオリジナルデータ
 
-- `.env`: 環境変数とホスト側のマウントパス
-- `docker-compose.yml`: 高速アクセスしたいデータを SSD に、大容量のライブラリデータを外付けドライブに配置するハイブリッドマウント構成
+### 同梱ファイル
 
-### 設定の確認方法
+- `.env.example`: `.env` のひな形
+- `docker-compose.yml`: SSD と外付け HDD を分離したハイブリッドマウント構成
 
-```bash
-docker compose config
-```
+### 前提
 
-macOS のユーザー名や外付けボリューム名が異なる場合は、先に `.env` のパスを書き換えてください。
+- 公式手順: <https://docs.immich.app/install/docker-compose/>
+- このリポジトリには `docker-compose.yml` と `.env.example` を同梱
+- そのため、公式手順の「必要ファイルのダウンロード」は不要
+- この README の対象は、クローン後のローカル調整と起動手順
+
+### セットアップ
+
+- [こちらを参照](docs/setup.md): `.env` の調整から起動まで
+
+### 完全リセット
+
+- [こちらを参照](docs/full-reset.md): DB と保存データを初期化する手順
+
+### Google Photos から Immich へ全量移行する手順
+
+- [こちらを参照](docs/copy-from-google-photo.md): Takeout 取り込み手順
