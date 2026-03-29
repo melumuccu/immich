@@ -12,6 +12,7 @@ services:
     ports:
       - "2283:2283"
     volumes:
+      - ${UPLOAD_PATH}:/usr/src/app/upload/upload
       - ${LIBRARY_PATH}:/usr/src/app/upload/library
       - ${THUMBNAILS_PATH}:/usr/src/app/upload/thumbs
       - ${PROFILE_PATH}:/usr/src/app/upload/profile
