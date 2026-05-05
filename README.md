@@ -29,6 +29,14 @@ Mac Studio 上で Immich を動かすための最小構成。保存先はハイ�
 
 - [こちらを参照](docs/full-reset.md): DB と保存データを初期化する手順
 
+### 外付け HDD を交換したときの復旧
+
+- [こちらを参照](docs/replace-external-hdd.md): Time Machine などから `library` を復元して `LIBRARY_PATH` を切り替える手順
+
+### 外付け HDD を交換時 の起動トラブル
+
+- [こちらを参照](docs/docker-desktop-mount-error.md): `/host_mnt/Volumes/...: file exists` エラーの原因と対処
+
 ### Google Photos から Immich へ全量移行する手順
 
 - [こちらを参照](docs/copy-from-google-photo.md): Takeout 取り込み手順
