@@ -28,3 +28,18 @@
     - [x] 差分収集が `collector_cursor` で再開できる。
     - [x] 1 回の学習で汎用モデルと少なくとも 1 本の専用モデルが保存される。
     - [x] 1 回の推論で `inference_trace` と `action_execution_log` が残る。
+
+## 次タスク
+
+- [ ] ジョブ実行の非同期化
+    - [ ] `/api/jobs/{job_type}` を同期実行から切り離し、手動実行も共通ランナー経由に寄せる。
+    - [ ] `jobRunId` の状態確認と履歴参照を API と GUI の両方から辿れるようにする。
+- [ ] scheduler 常駐化
+    - [ ] APScheduler を組み込み、`execution_schedule` を読んで定期実行を登録する。
+    - [ ] `sync_people_catalog` と `cleanup_runtime_state` を追加し、重複実行ガードを入れる。
+- [ ] GUI の本実装
+    - [ ] frontend パッケージを分離し、Svelte + TypeScript + Vite 構成へ移す。
+    - [ ] Dashboard と Jobs & Models から最新ジョブ結果、モデル件数、再実行を確認できるようにする。
+- [ ] 実運用前の確認強化
+    - [ ] `/healthz` と `/readyz` を追加し、起動確認と依存確認を分ける。
+    - [ ] Compose 上での collect、train、score、apply の E2E 確認を自動化する。

@@ -8,6 +8,30 @@
 - `collect`, `train`, `score`, `apply` の手動実行
 - unittest 一式の実行
 
+## 各 job が行うこと
+
+- `collect`: Immich から差分 asset を集め、feedback を取り込み、学習と推論に使う feature input を作る。
+- `train`: 収集済みデータから教師ラベルを再構成し、学習済みモデルと設定スナップショットを保存する。
+- `score`: 学習済みモデルで推論し、`inference_trace` と dry-run の `action_execution_log` を残す。
+- `apply`: 推論結果を使って Review アルバム追加や description 更新を実行し、`action_execution_log` を残す。
+
+## 日常での使い方と対象
+
+日常運用の基本順は `collect -> train -> score -> apply`。
+
+- `collect`
+    - 日常での使い方: まず最初に回す。新規追加、更新、trash、restore の差分を取り込みたいときに使う。
+    - 対象: 初回は取得できる asset 全体。2 回目以降は `collector_cursor` 以後に更新された asset と、trash 状態が変わった asset が中心。手動で救済した asset の feedback もここで取り込む。
+- `train`
+    - 日常での使い方: Favorite、trash、救済 feedback が増えた後や、ルール変更後に回す。毎回必須ではなく、学習に使う判断材料が増えたタイミングで回す。
+    - 対象: 直前の `collect` で feature input 化された asset 群と、`feedback_event` に入った weak positive。教師ラベルは trash、archive、favorite、weak positive から再構成する。
+- `score`
+    - 日常での使い方: 反映前の確認に使う。まず dry-run で推論結果と planned action を見て、閾値やルールが妥当かを確認する。
+    - 対象: 直前の `collect` で入力化された asset のうち、`isTrashed = false` かつ `visibility = timeline` のもの。初回は実質的に全件、以降は通常は差分中心。
+- `apply`
+    - 日常での使い方: `score` の結果を見て問題なければ最後に回す。Review アルバム追加や description 更新を本当に反映したいときだけ使う。
+    - 対象: `score` と同じ asset 群。最新または指定した `model` を使って再度推論し、action policy に従って実書き込みする。
+
 ## 現在の制約
 
 - 日常コマンドは `mise run` 前提
