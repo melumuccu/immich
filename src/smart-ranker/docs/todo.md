@@ -20,9 +20,9 @@
 - [x] 推論、反映ジョブの実装
     - [x] `isTrashed: false` かつ `visibility: timeline` の asset を対象にスコア算出し、`inference_trace` へ保存する。
     - [x] dry-run 付きで `action_execution_log` を残し、Review アルバム追加や description 更新を `Action Executor` から実行する。
-- [ ] API と最小 GUI の実装
-    - [ ] 手動実行 API は `jobRunId` を返す形で `collect`, `train`, `score`, `apply` を先に用意する。
-    - [ ] GUI は Person Group、Categories & Routing、Policies、Jobs & Models、Event Ledger の最小画面から着手する。
+- [x] API と最小 GUI の実装
+    - [x] 手動実行 API は `jobRunId` を返す形で `collect`, `train`, `score`, `apply` を先に用意する。
+    - [x] GUI は Person Group、Categories & Routing、Policies、Jobs & Models、Event Ledger の最小画面から着手する。
 - [ ] 初回完走条件
     - [ ] Favorite、trash、People、CLIP embedding を取得できる。
     - [ ] 差分収集が `collector_cursor` で再開できる。

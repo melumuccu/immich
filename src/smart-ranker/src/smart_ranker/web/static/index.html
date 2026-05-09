@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Smart Ranker Console</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Smart Ranker Console</p>
+        <h1>Manual Jobs And Operating Surfaces</h1>
+        <p class="lede">差分収集、学習、推論、反映を手動で叩きつつ、人物グループとルーティング、ポリシー、モデル、台帳を最小構成で確認する管理画面。</p>
+        <div class="job-grid">
+          <button data-job="collect">collect</button>
+          <button data-job="train">train</button>
+          <button data-job="score">score</button>
+          <button data-job="apply">apply</button>
+        </div>
+        <pre id="job-output">job output will appear here</pre>
+      </section>
+
+      <section class="panel-grid">
+        <article class="panel">
+          <h2>Person Group</h2>
+          <ul id="person-groups"></ul>
+        </article>
+        <article class="panel">
+          <h2>Categories &amp; Routing</h2>
+          <ul id="categories"></ul>
+        </article>
+        <article class="panel">
+          <h2>Policies</h2>
+          <ul id="policies"></ul>
+        </article>
+        <article class="panel">
+          <h2>Jobs &amp; Models</h2>
+          <ul id="models"></ul>
+        </article>
+        <article class="panel panel-wide">
+          <h2>Event Ledger</h2>
+          <div class="ledger-columns">
+            <div>
+              <h3>Feedback</h3>
+              <ul id="ledger-feedback"></ul>
+            </div>
+            <div>
+              <h3>Inference</h3>
+              <ul id="ledger-traces"></ul>
+            </div>
+            <div>
+              <h3>Action Log</h3>
+              <ul id="ledger-actions"></ul>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+  </html>

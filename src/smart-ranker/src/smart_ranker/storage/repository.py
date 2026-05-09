@@ -187,6 +187,45 @@ class StorageRepository:
                 (profile_id, immich_user_id, display_name, timezone, locale),
             )
 
+    def insert_person_group(
+        self,
+        *,
+        group_id: str,
+        profile_id: str,
+        group_key: str,
+        display_name: str,
+        group_type: str,
+    ) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO person_group (
+                  id, profile_id, group_key, display_name, group_type, aliases_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, '[]', 1)
+                """,
+                (group_id, profile_id, group_key, display_name, group_type),
+            )
+
+    def insert_category(
+        self,
+        *,
+        category_id: str,
+        profile_id: str,
+        category_key: str,
+        display_name: str,
+        category_type: str,
+        media_scope: str,
+    ) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO category (
+                  id, profile_id, category_key, display_name, category_type, media_scope, aliases_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, '[]', 1)
+                """,
+                (category_id, profile_id, category_key, display_name, category_type, media_scope),
+            )
+
     def insert_action_policy(
         self,
         *,
@@ -204,6 +243,30 @@ class StorageRepository:
                 """,
                 (policy_id, profile_id, policy_key, display_name, execution_mode),
             )
+
+    def list_person_groups(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM person_group WHERE profile_id = ? ORDER BY display_name ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def list_categories(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM category WHERE profile_id = ? ORDER BY display_name ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def list_action_policies(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM action_policy WHERE profile_id = ? ORDER BY display_name ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
 
     def insert_action_destination(
         self,
