@@ -5,6 +5,50 @@ const DEFAULT_DESCRIPTION_RESOURCE_ID = "asset-description";
 const DEFAULT_REVIEW_THRESHOLD = 0.5;
 const LIVE_RELOAD_ENDPOINT = "/api/dev/live-reload";
 const LIVE_RELOAD_DEFAULT_INTERVAL_MS = 1000;
+const JOB_HISTORY_STORAGE_KEY = "smart-ranker-job-history";
+const MAX_JOB_HISTORY = 12;
+
+const normalizeRoute = (path) => {
+  const normalized = String(path ?? "/").replace(/\/+$/, "") || "/";
+  return normalized === "/settings" ? "settings" : "home";
+};
+
+const normalizeStoredJobRun = (jobRun) => {
+  if (!jobRun || !jobRun.jobRunId || !jobRun.jobType) {
+    return null;
+  }
+
+  return {
+    jobRunId: String(jobRun.jobRunId),
+    jobType: String(jobRun.jobType),
+    status: String(jobRun.status ?? "unknown"),
+    submittedAt: String(jobRun.submittedAt ?? ""),
+    payload: typeof jobRun.payload === "object" && jobRun.payload !== null ? jobRun.payload : {},
+    result: jobRun.result ?? null,
+  };
+};
+
+const loadJobHistory = () => {
+  if (typeof window === "undefined" || !("localStorage" in window)) {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(JOB_HISTORY_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.map((item) => normalizeStoredJobRun(item)).filter(Boolean);
+  } catch {
+    return [];
+  }
+};
 
 const CATEGORY_TYPE_OPTIONS = [
   { value: "core", label: "core" },
@@ -53,6 +97,8 @@ const state = {
     },
   },
   ui: {
+    currentRoute: normalizeRoute(window.location.pathname),
+    jobHistory: loadJobHistory(),
     selectedPersonGroupKey: null,
     personSearchQuery: "",
     personSearchResults: [],
@@ -147,8 +193,23 @@ const startLiveReload = () => {
   scheduleLiveReloadPoll(0);
 };
 
+const persistJobHistory = () => {
+  if (typeof window === "undefined" || !("localStorage" in window)) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(JOB_HISTORY_STORAGE_KEY, JSON.stringify(state.ui.jobHistory));
+  } catch {
+    // Ignore storage errors so the console still works in private browsing or quota pressure.
+  }
+};
+
 const setStatus = (elementId, message, isError = false) => {
   const element = document.getElementById(elementId);
+  if (!element) {
+    return;
+  }
   element.textContent = message;
   element.classList.toggle("is-error", isError);
 };
@@ -172,6 +233,386 @@ const createTempId = (prefix) => {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+};
+
+const rememberJobRun = (jobRun) => {
+  const normalized = normalizeStoredJobRun(jobRun);
+  if (normalized === null) {
+    return;
+  }
+
+  state.ui.jobHistory = [
+    normalized,
+    ...state.ui.jobHistory.filter((item) => item.jobRunId !== normalized.jobRunId),
+  ].slice(0, MAX_JOB_HISTORY);
+  persistJobHistory();
+};
+
+const compareIsoTimestamp = (left, right) => String(right ?? "").localeCompare(String(left ?? ""));
+
+const getLatestItem = (items, field) => [...items]
+  .filter((item) => item && item[field])
+  .sort((left, right) => compareIsoTimestamp(left[field], right[field]))[0] ?? null;
+
+const getRecentJobRun = (jobType) => state.ui.jobHistory.find((jobRun) => jobRun.jobType === jobType) ?? null;
+
+const getLatestModelSnapshot = () => getLatestItem(state.settings.models, "trainedAt");
+
+const getLatestTrace = () => getLatestItem(state.settings.ledger.inferenceTraces, "occurred_at");
+
+const getLatestActionLog = () => getLatestItem(state.settings.ledger.actionExecutionLogs, "executed_at");
+
+const getFileName = (value) => {
+  const parts = String(value ?? "").split("/").filter(Boolean);
+  return parts.at(-1) ?? "";
+};
+
+const formatDateTime = (value) => {
+  if (!value) {
+    return "n/a";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat("ja-JP", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
+
+const formatCount = (value) => new Intl.NumberFormat("ja-JP").format(Number(value) || 0);
+
+const formatScore = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : "n/a";
+};
+
+const formatJobResultSummary = (jobRun) => {
+  if (!jobRun) {
+    return "not run yet";
+  }
+
+  const result = jobRun.result ?? {};
+  if (jobRun.status === "failed") {
+    return String(result.error ?? result.errorType ?? "job failed");
+  }
+
+  if (jobRun.jobType === "collect") {
+    return `assets ${formatCount(result.assetCount)} / feature inputs ${formatCount(result.featureInputCount)}`;
+  }
+
+  if (jobRun.jobType === "train") {
+    return `models ${formatCount(result.modelCount)} / ${String((result.modelKeys ?? []).join(", ") || "no keys")}`;
+  }
+
+  if (jobRun.jobType === "score" || jobRun.jobType === "apply") {
+    return `traces ${formatCount(result.traceCount)}${result.dryRun ? " / dry run" : ""}`;
+  }
+
+  return `${jobRun.jobType} completed`;
+};
+
+const renderJobOutput = (jobRun = state.ui.jobHistory[0] ?? null) => {
+  const output = document.getElementById("job-output");
+  if (!output) {
+    return;
+  }
+
+  if (jobRun === null) {
+    output.textContent = "Run collect / train / score / apply to inspect the accepted payload and final result.";
+    return;
+  }
+
+  output.textContent = JSON.stringify(jobRun, null, 2);
+};
+
+const buildStageCards = () => {
+  const collectRun = getRecentJobRun("collect");
+  const trainRun = getRecentJobRun("train");
+  const scoreRun = getRecentJobRun("score");
+  const applyRun = getRecentJobRun("apply");
+  const latestModel = getLatestModelSnapshot();
+  const latestTrace = getLatestTrace();
+  const latestAction = getLatestActionLog();
+
+  const stages = [
+    {
+      title: "Collect",
+      jobRun: collectRun,
+      fallbackActive: false,
+      note: collectRun
+        ? "差分収集と feature input 作成が完了した結果です。"
+        : "次の collect 実行で asset 数と feature input 数がここに出ます。",
+      facts: collectRun
+        ? [
+          { label: "assets", value: formatCount(collectRun.result?.assetCount) },
+          { label: "feature inputs", value: formatCount(collectRun.result?.featureInputCount) },
+          { label: "feedback", value: formatCount(collectRun.result?.feedbackCount) },
+        ]
+        : [
+          { label: "status", value: "idle" },
+          { label: "waiting", value: "manual collect result" },
+        ],
+    },
+    {
+      title: "Train",
+      jobRun: trainRun,
+      fallbackActive: latestModel !== null,
+      note: trainRun
+        ? "学習で生成された model artifact と snapshot を表示します。"
+        : latestModel
+          ? "保存済み snapshot から直近の train 結果を読み出しています。"
+          : "train 実行後に snapshot 情報がここへ並びます。",
+      facts: trainRun
+        ? [
+          { label: "run id", value: String(trainRun.result?.runId ?? "n/a") },
+          { label: "models", value: formatCount(trainRun.result?.modelCount) },
+          { label: "snapshot", value: getFileName(trainRun.result?.snapshotPath) || "n/a" },
+        ]
+        : latestModel
+          ? [
+            { label: "run id", value: String(latestModel.runId ?? "n/a") },
+            { label: "trained at", value: formatDateTime(latestModel.trainedAt) },
+            { label: "models", value: String((latestModel.models ?? []).map((model) => model.model_key ?? "unknown").join(", ") || "n/a") },
+          ]
+          : [
+            { label: "status", value: "idle" },
+            { label: "waiting", value: "train snapshot" },
+          ],
+    },
+    {
+      title: "Score",
+      jobRun: scoreRun,
+      fallbackActive: latestTrace !== null,
+      note: scoreRun
+        ? "推論結果の trace 数と dry run 状態です。"
+        : latestTrace
+          ? "保存済み inference trace から直近の score を可視化しています。"
+          : "score 実行後に trace がここへ反映されます。",
+      facts: scoreRun
+        ? [
+          { label: "traces", value: formatCount(scoreRun.result?.traceCount) },
+          { label: "dry run", value: scoreRun.result?.dryRun ? "yes" : "no" },
+          { label: "model run", value: String(scoreRun.result?.modelRunId ?? "n/a") },
+        ]
+        : latestTrace
+          ? [
+            { label: "traces", value: formatCount(state.settings.ledger.inferenceTraces.length) },
+            { label: "latest asset", value: String(latestTrace.immich_asset_id ?? "n/a") },
+            { label: "final score", value: formatScore(latestTrace.final_score) },
+          ]
+          : [
+            { label: "status", value: "idle" },
+            { label: "waiting", value: "inference trace" },
+          ],
+    },
+    {
+      title: "Apply",
+      jobRun: applyRun,
+      fallbackActive: latestAction !== null,
+      note: applyRun
+        ? "action 実行ログと apply 結果です。"
+        : latestAction
+          ? "保存済み action log から直近の apply を可視化しています。"
+          : "apply 実行後に action log がここへ反映されます。",
+      facts: applyRun
+        ? [
+          { label: "traces", value: formatCount(applyRun.result?.traceCount) },
+          { label: "dry run", value: applyRun.result?.dryRun ? "yes" : "no" },
+          { label: "model run", value: String(applyRun.result?.modelRunId ?? "n/a") },
+        ]
+        : latestAction
+          ? [
+            { label: "actions", value: formatCount(state.settings.ledger.actionExecutionLogs.length) },
+            { label: "latest action", value: String(latestAction.action_type ?? "n/a") },
+            { label: "status", value: String(latestAction.status ?? "n/a") },
+          ]
+          : [
+            { label: "status", value: "idle" },
+            { label: "waiting", value: "action execution log" },
+          ],
+    },
+  ];
+
+  return stages.map((stage) => {
+    if (stage.jobRun?.status === "failed") {
+      return { ...stage, badge: "failed", tone: "is-failed" };
+    }
+    if (stage.jobRun !== null) {
+      return { ...stage, badge: "completed", tone: "is-completed" };
+    }
+    if (stage.fallbackActive) {
+      return { ...stage, badge: "persisted", tone: "is-persisted" };
+    }
+    return { ...stage, badge: "idle", tone: "is-idle" };
+  });
+};
+
+const buildActivityFeedItems = () => {
+  const jobItems = state.ui.jobHistory.slice(0, 6).map((jobRun) => ({
+    at: jobRun.submittedAt,
+    kind: `job / ${jobRun.jobType}`,
+    title: formatJobResultSummary(jobRun),
+    note: jobRun.status === "failed"
+      ? String(jobRun.result?.errorType ?? "failed")
+      : `submitted ${formatDateTime(jobRun.submittedAt)}`,
+    tone: jobRun.status === "failed" ? "is-error" : "is-job",
+  }));
+
+  const traceItems = [...state.settings.ledger.inferenceTraces]
+    .sort((left, right) => compareIsoTimestamp(left.occurred_at, right.occurred_at))
+    .slice(0, 3)
+    .map((trace) => ({
+      at: trace.occurred_at,
+      kind: "trace",
+      title: `${String(trace.immich_asset_id ?? "asset")} / score ${formatScore(trace.final_score)}`,
+      note: `candidates ${(trace.candidate_categories ?? []).join(", ") || "n/a"}`,
+      tone: "is-trace",
+    }));
+
+  const actionItems = [...state.settings.ledger.actionExecutionLogs]
+    .sort((left, right) => compareIsoTimestamp(left.executed_at, right.executed_at))
+    .slice(0, 3)
+    .map((actionLog) => ({
+      at: actionLog.executed_at,
+      kind: "action",
+      title: `${String(actionLog.action_type ?? "action")} / ${String(actionLog.status ?? "unknown")}`,
+      note: `${String(actionLog.immich_asset_id ?? "asset")} / ${actionLog.dry_run ? "dry run" : "write"}`,
+      tone: actionLog.status === "failed" ? "is-error" : "is-action",
+    }));
+
+  return [...jobItems, ...traceItems, ...actionItems]
+    .sort((left, right) => compareIsoTimestamp(left.at, right.at))
+    .slice(0, 8);
+};
+
+const renderProcessVisualization = () => {
+  const container = document.getElementById("process-visualization");
+  if (!container) {
+    return;
+  }
+
+  const latestModel = getLatestModelSnapshot();
+  const latestTrace = getLatestTrace();
+  const latestAction = getLatestActionLog();
+  const recentJob = state.ui.jobHistory[0] ?? null;
+  const metricCards = [
+    {
+      label: "recent manual jobs",
+      value: formatCount(state.ui.jobHistory.length),
+      note: recentJob ? `${recentJob.jobType} / ${formatDateTime(recentJob.submittedAt)}` : "run a job from this console",
+    },
+    {
+      label: "trained snapshots",
+      value: formatCount(state.settings.models.length),
+      note: latestModel ? `${String(latestModel.runId ?? "run")} / ${formatDateTime(latestModel.trainedAt)}` : "no snapshot yet",
+    },
+    {
+      label: "inference traces",
+      value: formatCount(state.settings.ledger.inferenceTraces.length),
+      note: latestTrace ? `${String(latestTrace.immich_asset_id ?? "asset")} / score ${formatScore(latestTrace.final_score)}` : "no trace yet",
+    },
+    {
+      label: "action logs",
+      value: formatCount(state.settings.ledger.actionExecutionLogs.length),
+      note: latestAction ? `${String(latestAction.action_type ?? "action")} / ${String(latestAction.status ?? "unknown")}` : "no action yet",
+    },
+  ];
+  const stages = buildStageCards();
+  const activityItems = buildActivityFeedItems();
+
+  container.innerHTML = `
+    <article class="panel panel-wide process-summary">
+      <div class="panel-header">
+        <div>
+          <h2>Process Overview</h2>
+          <p class="panel-note">manual job の直近結果と、snapshot / ledger に残った派生結果を同じ面で追うためのビューです。</p>
+        </div>
+        <span class="summary-chip">${escapeHtml(recentJob ? `${recentJob.jobType} ${recentJob.status}` : "waiting for manual runs")}</span>
+      </div>
+      <div class="process-metrics">
+        ${metricCards.map((item) => `
+          <article class="metric-card">
+            <p class="metric-label">${escapeHtml(item.label)}</p>
+            <strong class="metric-value">${escapeHtml(item.value)}</strong>
+            <p class="metric-note">${escapeHtml(item.note)}</p>
+          </article>
+        `).join("")}
+      </div>
+    </article>
+    <article class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Pipeline Stages</h2>
+          <p class="panel-note">collect, train, score, apply を段ごとに見て、どこまで結果が出ているかを把握します。</p>
+        </div>
+      </div>
+      <div class="stage-grid">
+        ${stages.map((stage) => `
+          <article class="stage-card ${escapeHtml(stage.tone)}">
+            <div class="stage-header">
+              <strong class="stage-name">${escapeHtml(stage.title)}</strong>
+              <span class="process-badge">${escapeHtml(stage.badge)}</span>
+            </div>
+            <p class="stage-note">${escapeHtml(stage.note)}</p>
+            <dl class="stage-facts">
+              ${stage.facts.map((fact) => `
+                <div>
+                  <dt>${escapeHtml(fact.label)}</dt>
+                  <dd>${escapeHtml(fact.value)}</dd>
+                </div>
+              `).join("")}
+            </dl>
+          </article>
+        `).join("")}
+      </div>
+    </article>
+    <article class="panel">
+      <div class="panel-header">
+        <div>
+          <h2>Recent Activity</h2>
+          <p class="panel-note">このブラウザで叩いた manual job と、保存済み trace / action の直近イベントです。</p>
+        </div>
+      </div>
+      ${activityItems.length ? `
+        <div class="activity-feed">
+          ${activityItems.map((item) => `
+            <article class="activity-item ${escapeHtml(item.tone)}">
+              <div class="activity-meta">
+                <span class="process-badge">${escapeHtml(item.kind)}</span>
+                <time>${escapeHtml(formatDateTime(item.at))}</time>
+              </div>
+              <strong>${escapeHtml(item.title)}</strong>
+              <p class="activity-note">${escapeHtml(item.note)}</p>
+            </article>
+          `).join("")}
+        </div>
+      ` : `
+        <div class="empty-state">
+          <p class="subtle">manual job を実行すると、この画面に stage ごとの結果と recent activity が積み上がります。</p>
+        </div>
+      `}
+    </article>
+  `;
+};
+
+const applyRouteState = () => {
+  document.body.dataset.route = state.ui.currentRoute;
+  document.title = state.ui.currentRoute === "settings"
+    ? "Smart Ranker Console / Settings"
+    : "Smart Ranker Console";
+
+  for (const link of document.querySelectorAll("[data-route-link]")) {
+    const isCurrent = link.dataset.routeLink === state.ui.currentRoute;
+    if (isCurrent) {
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.removeAttribute("aria-current");
+    }
+  }
 };
 
 const optionHtml = (options, selectedValue) => options
@@ -726,7 +1167,10 @@ const renderDerivedLists = () => {
 };
 
 const renderAll = () => {
+  applyRouteState();
   ensurePersonGroupSelection();
+  renderJobOutput();
+  renderProcessVisualization();
   renderPersonGroupApp();
   renderCategoriesRoutingApp();
   renderPoliciesApp();
@@ -1246,20 +1690,48 @@ const installSeedButton = () => {
 };
 
 const installJobButtons = () => {
-  const output = document.getElementById("job-output");
+  const buttons = [...document.querySelectorAll("[data-job]")];
   for (const button of document.querySelectorAll("[data-job]")) {
     button.addEventListener("click", async () => {
       const jobType = button.dataset.job;
       try {
-        const payload = await fetchJson(`/api/jobs/${jobType}`, {
+        for (const control of buttons) {
+          control.disabled = true;
+        }
+        setStatus("global-status", `running ${jobType}...`);
+        const accepted = await fetchJson(`/api/jobs/${jobType}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ trigger: "manual-ui" }),
         });
-        output.textContent = JSON.stringify(payload, null, 2);
+        const jobRun = await fetchJson(`/api/jobs/${accepted.jobRunId}`);
+        rememberJobRun(jobRun);
+        renderJobOutput(jobRun);
+        setStatus(
+          "global-status",
+          jobRun.status === "failed"
+            ? `${jobType} failed: ${formatJobResultSummary(jobRun)}`
+            : `${jobType} completed: ${formatJobResultSummary(jobRun)}`,
+          jobRun.status === "failed",
+        );
         await refresh();
       } catch (error) {
-        output.textContent = error instanceof Error ? error.message : String(error);
+        renderJobOutput({
+          jobRunId: `error-${Date.now()}`,
+          jobType,
+          status: "failed",
+          submittedAt: new Date().toISOString(),
+          payload: { trigger: "manual-ui" },
+          result: {
+            error: error instanceof Error ? error.message : String(error),
+            errorType: "ConsoleRequestError",
+          },
+        });
+        setStatus("global-status", error instanceof Error ? error.message : String(error), true);
+      } finally {
+        for (const control of buttons) {
+          control.disabled = false;
+        }
       }
     });
   }

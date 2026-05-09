@@ -8,10 +8,20 @@
   </head>
   <body>
     <main class="shell">
+      <header class="topbar">
+        <div class="topbar-brand">
+          <p class="eyebrow">Smart Ranker Console</p>
+          <p class="topbar-title">Process And Settings</p>
+        </div>
+        <nav class="route-nav" aria-label="Console sections">
+          <a href="/" data-route-link="home">home</a>
+          <a href="/settings" data-route-link="settings">settings</a>
+        </nav>
+      </header>
+
       <section class="hero">
-        <p class="eyebrow">Smart Ranker Console</p>
         <h1>Manual Jobs And Operating Surfaces</h1>
-        <p class="lede">差分収集、学習、推論、反映を手動で叩きつつ、人物グループとルーティング、ポリシー、モデル、台帳を最小構成で確認する管理画面。</p>
+        <p class="lede">差分収集、学習、推論、反映の manual run をトップで追い、人物グループやルーティング、ポリシー編集は settings 側へ分けた管理画面。</p>
         <div class="job-grid">
           <button data-job="collect">collect</button>
           <button data-job="train">train</button>
@@ -22,8 +32,10 @@
           <button id="seed-defaults" class="button-secondary" type="button">seed defaults</button>
           <p id="global-status" class="status-line">master data status will appear here</p>
         </div>
-        <pre id="job-output">job output will appear here</pre>
+        <pre id="job-output">latest job run result will appear here</pre>
       </section>
+
+      <section id="process-visualization" class="process-grid" aria-live="polite"></section>
 
       <section class="panel-grid">
         <article class="panel">

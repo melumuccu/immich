@@ -349,9 +349,13 @@ class WebAppTest(unittest.TestCase):
             client = TestClient(app)
 
             html = client.get("/")
+            settings_html = client.get("/settings")
             self.assertEqual(200, html.status_code)
+            self.assertEqual(200, settings_html.status_code)
             self.assertIn("Person Group", html.text)
             self.assertIn("Event Ledger", html.text)
+            self.assertIn("settings", html.text)
+            self.assertIn("Person Group", settings_html.text)
 
             person_groups = client.get("/api/person-groups").json()
             categories = client.get("/api/categories").json()

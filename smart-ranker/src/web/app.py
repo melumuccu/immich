@@ -89,9 +89,16 @@ def create_app(
     app.state.live_reload_watch_dir = web_dir
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    def _render_console() -> FileResponse:
+        return FileResponse(static_dir / "index.html")
+
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(static_dir / "index.html")
+        return _render_console()
+
+    @app.get("/settings")
+    def settings() -> FileResponse:
+        return _render_console()
 
     def _build_live_reload_token() -> str:
         watch_dir = app.state.live_reload_watch_dir
