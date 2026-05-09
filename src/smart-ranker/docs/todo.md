@@ -3,9 +3,9 @@
 - [x] ストレージ初期化
     - [x] SQLite migration で `ranker_profile`, `person_group`, `person_group_member`, `category`, `routing_rule`, `training_signal_rule`, `category_score_policy`, `action_destination`, `action_policy`, `action_policy_step`, `execution_schedule`, `collector_cursor`, `feedback_event`, `inference_trace`, `action_execution_log` を作る。
     - [x] モデル保存ディレクトリ、設定スナップショット出力先、ジョブログ出力先を volume 上に確保する。
-- [ ] Immich 接続層の実装
-    - [ ] `immich_client` に asset metadata、metadata search、People、`search/smart`、書き込み系 API を実装する。
-    - [ ] `immich_db_reader` に Immich DB read-only 接続と `smart_search` の取得処理を実装する。
+- [x] Immich 接続層の実装
+    - [x] `immich_client` に asset metadata、metadata search、People、`search/smart`、書き込み系 API を実装する。
+    - [x] `immich_db_reader` に Immich DB read-only 接続と `smart_search` の取得処理を実装する。
 - [ ] 差分収集ジョブの実装
     - [ ] `collector_cursor` を読み、`updatedAfter` と `trashedAfter` を使った差分取得を実装する。
     - [ ] 削除候補アルバム差分、または GUI 手動除外入力から `delete_candidate_rescued` の `feedback_event` を追記する。
