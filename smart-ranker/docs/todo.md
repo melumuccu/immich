@@ -23,8 +23,8 @@
 - [x] API と最小 GUI の実装
     - [x] 手動実行 API は `jobRunId` を返す形で `collect`, `train`, `score`, `apply` を先に用意する。
     - [x] GUI は Person Group、Categories & Routing、Policies、Jobs & Models、Event Ledger の最小画面から着手する。
-- [ ] 初回完走条件
-    - [ ] Favorite、trash、People、CLIP embedding を取得できる。
-    - [ ] 差分収集が `collector_cursor` で再開できる。
-    - [ ] 1 回の学習で汎用モデルと少なくとも 1 本の専用モデルが保存される。
-    - [ ] 1 回の推論で `inference_trace` と `action_execution_log` が残る。
+- [x] 初回完走条件
+    - [x] Favorite、trash、People、CLIP embedding を取得できる。
+    - [x] 差分収集が `collector_cursor` で再開できる。
+    - [x] 1 回の学習で汎用モデルと少なくとも 1 本の専用モデルが保存される。
+    - [x] 1 回の推論で `inference_trace` と `action_execution_log` が残る。

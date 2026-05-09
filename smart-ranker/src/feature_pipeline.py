@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Protocol, Sequence
 
 from smart_ranker.immich_client import AssetSnapshot
 
@@ -76,6 +76,68 @@ class AssetFeatureInput:
         if normalized_source == "tag_names":
             return "\n".join(tag.casefold() for tag in self.tag_names)
         raise ValueError(f"Unsupported source: {source}")
+
+
+@dataclass(frozen=True)
+class AssetFeatureBuildResult:
+    inputs: list[AssetFeatureInput]
+    missing_embedding_asset_ids: tuple[str, ...] = ()
+
+
+class EmbeddingReader(Protocol):
+    def fetch_embeddings(self, asset_ids: Iterable[str]) -> dict[str, list[float]]:
+        ...
+
+
+class AssetFeatureInputBuilder:
+    def __init__(
+        self,
+        embedding_reader: EmbeddingReader,
+        *,
+        ocr_text_provider: Callable[[AssetSnapshot], str | None] | None = None,
+        tag_provider: Callable[[AssetSnapshot], Sequence[str]] | None = None,
+        weak_smart_category_provider: Callable[[Sequence[AssetSnapshot]], dict[str, Sequence[str]]] | None = None,
+    ) -> None:
+        self.embedding_reader = embedding_reader
+        self.ocr_text_provider = ocr_text_provider
+        self.tag_provider = tag_provider
+        self.weak_smart_category_provider = weak_smart_category_provider
+
+    def build(self, assets: Sequence[AssetSnapshot]) -> AssetFeatureBuildResult:
+        if not assets:
+            return AssetFeatureBuildResult(inputs=[])
+
+        asset_ids = [asset.id for asset in assets]
+        embeddings_by_asset_id = self.embedding_reader.fetch_embeddings(asset_ids)
+        weak_smart_categories_by_asset_id = self._resolve_weak_smart_categories(assets)
+
+        inputs: list[AssetFeatureInput] = []
+        missing_embedding_asset_ids: list[str] = []
+        for asset in assets:
+            embedding = embeddings_by_asset_id.get(asset.id)
+            if embedding is None:
+                missing_embedding_asset_ids.append(asset.id)
+                continue
+
+            inputs.append(
+                AssetFeatureInput(
+                    asset=asset,
+                    embedding=embedding,
+                    ocr_text=self.ocr_text_provider(asset) if self.ocr_text_provider else None,
+                    tag_names=tuple(self.tag_provider(asset)) if self.tag_provider else (),
+                    weak_smart_categories=tuple(weak_smart_categories_by_asset_id.get(asset.id, ())),
+                )
+            )
+
+        return AssetFeatureBuildResult(
+            inputs=inputs,
+            missing_embedding_asset_ids=tuple(missing_embedding_asset_ids),
+        )
+
+    def _resolve_weak_smart_categories(self, assets: Sequence[AssetSnapshot]) -> dict[str, Sequence[str]]:
+        if self.weak_smart_category_provider is None:
+            return {}
+        return self.weak_smart_category_provider(assets)
 
 
 @dataclass(frozen=True)
