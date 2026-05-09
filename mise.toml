@@ -1,0 +1,11 @@
+[tasks.start]
+description = "Docker Compose で全コンテナを起動する"
+run = "docker compose up -d"
+
+[tasks.end]
+description = "Docker Compose で全コンテナを停止する"
+run = "docker compose down"
+
+[tasks.update-immich]
+description = "Immich を最新バージョンに更新する"
+run = "docker compose pull && docker compose up -d"

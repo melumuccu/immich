@@ -52,8 +52,6 @@ services:
     restart: unless-stopped
 
   smart-ranker:
-    profiles:
-      - smart-ranker
     container_name: smart_ranker
     build:
       context: ./smart-ranker
