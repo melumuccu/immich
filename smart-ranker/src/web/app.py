@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from smart_ranker.storage import bootstrap_storage
 from smart_ranker.storage.repository import StorageRepository
-from smart_ranker.web.job_service import JobService
+from smart_ranker.web.job_service import JobService, build_job_service
 
 
 def create_app(
@@ -24,7 +24,11 @@ def create_app(
     app.state.paths = bootstrap_result.paths
     app.state.repository = repository
     app.state.profile_id = profile_id
-    app.state.job_service = job_service or JobService()
+    app.state.job_service = job_service or build_job_service(
+        storage_paths=bootstrap_result.paths,
+        repository=repository,
+        profile_id=profile_id,
+    )
 
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=static_dir), name="static")

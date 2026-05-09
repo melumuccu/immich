@@ -17,6 +17,8 @@
    - `IMMICH_VERSION`: 既定値は `release`
    - `DB_USERNAME`: 特別な要件がなければ既定値のまま
    - `DB_DATABASE_NAME`: 特別な要件がなければ既定値のまま
+   - Smart Ranker を使う場合は `SMART_RANKER_IMMICH_API_KEY` と `SMART_RANKER_IMMICH_USER_ID` を設定する
+   - Smart Ranker の Web UI ポートを変えたい場合は `SMART_RANKER_PORT` を調整する
 
 1. `docker-compose.yml` の扱いを確認する
    - 原則そのまま使用する
@@ -43,6 +45,21 @@
    ```bash
    docker compose up -d
    ```
+
+1. Smart Ranker も Compose network 内で起動したい場合は profile を付けて起動する
+
+   ```bash
+   docker compose --profile smart-ranker up -d
+   ```
+
+   Smart Ranker は Compose network 内で `immich-server:2283` と `database:5432` を使うため、PostgreSQL の host 側 port 公開は不要。
+
+   確認先:
+
+   - Immich: `http://localhost:2283`
+   - Smart Ranker: `http://localhost:8010`
+
+   `SMART_RANKER_PORT` を変えた場合は Smart Ranker 側の URL もそれに合わせる。
 
    `Error response from daemon: Head "https://ghcr.io/v2/...": denied: denied` が出る場合、Docker Desktop に保存された `ghcr.io` の認証情報が壊れている可能性がある。対処は以下。
 

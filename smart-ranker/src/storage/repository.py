@@ -187,6 +187,37 @@ class StorageRepository:
                 (profile_id, immich_user_id, display_name, timezone, locale),
             )
 
+    def ensure_profile(
+        self,
+        *,
+        profile_id: str,
+        immich_user_id: str,
+        display_name: str = "default",
+        timezone: str = "UTC",
+        locale: str = "ja-JP",
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO ranker_profile (id, immich_user_id, display_name, timezone, locale, enabled)
+                VALUES (?, ?, ?, ?, ?, 1)
+                ON CONFLICT(id) DO UPDATE SET
+                  immich_user_id = excluded.immich_user_id,
+                  display_name = excluded.display_name,
+                  timezone = excluded.timezone,
+                  locale = excluded.locale,
+                  enabled = 1
+                """,
+                (profile_id, immich_user_id, display_name, timezone, locale),
+            )
+            row = connection.execute(
+                "SELECT id FROM ranker_profile WHERE id = ?",
+                (profile_id,),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
+
     def insert_person_group(
         self,
         *,
@@ -244,6 +275,35 @@ class StorageRepository:
                 (policy_id, profile_id, policy_key, display_name, execution_mode),
             )
 
+    def ensure_action_policy(
+        self,
+        *,
+        policy_id: str,
+        profile_id: str,
+        policy_key: str,
+        display_name: str,
+        execution_mode: str,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO action_policy (id, profile_id, policy_key, display_name, execution_mode, display_json, enabled)
+                VALUES (?, ?, ?, ?, ?, '{}', 1)
+                ON CONFLICT(profile_id, policy_key) DO UPDATE SET
+                  display_name = excluded.display_name,
+                  execution_mode = excluded.execution_mode,
+                  enabled = 1
+                """,
+                (policy_id, profile_id, policy_key, display_name, execution_mode),
+            )
+            row = connection.execute(
+                "SELECT id FROM action_policy WHERE profile_id = ? AND policy_key = ?",
+                (profile_id, policy_key),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
+
     def list_person_groups(self, profile_id: str) -> list[sqlite3.Row]:
         with self._open() as connection:
             rows = connection.execute(
@@ -294,6 +354,45 @@ class StorageRepository:
                     json.dumps(config or {}, ensure_ascii=True, sort_keys=True),
                 ),
             )
+
+    def ensure_action_destination(
+        self,
+        *,
+        destination_id: str,
+        profile_id: str,
+        destination_key: str,
+        destination_type: str,
+        immich_resource_id: str,
+        config: dict[str, Any] | None = None,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO action_destination (
+                  id, profile_id, destination_key, destination_type, immich_resource_id, config_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(profile_id, destination_key) DO UPDATE SET
+                  destination_type = excluded.destination_type,
+                  immich_resource_id = excluded.immich_resource_id,
+                  config_json = excluded.config_json,
+                  enabled = 1
+                """,
+                (
+                    destination_id,
+                    profile_id,
+                    destination_key,
+                    destination_type,
+                    immich_resource_id,
+                    json.dumps(config or {}, ensure_ascii=True, sort_keys=True),
+                ),
+            )
+            row = connection.execute(
+                "SELECT id FROM action_destination WHERE profile_id = ? AND destination_key = ?",
+                (profile_id, destination_key),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
 
     def insert_inference_trace(self, record: InferenceTraceRecord) -> None:
         with self._open() as connection:

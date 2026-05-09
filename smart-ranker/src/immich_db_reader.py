@@ -30,13 +30,10 @@ class ImmichDbReader:
     ) -> None:
         self.config = config
         self._owns_connection = connection is None
-        self.connection = connection or psycopg.connect(config.dsn, autocommit=True)
-        if self._owns_connection:
-            with self.connection.cursor() as cursor:
-                cursor.execute("SET default_transaction_read_only = on")
+        self.connection = connection
 
     def close(self) -> None:
-        if self._owns_connection:
+        if self._owns_connection and self.connection is not None:
             self.connection.close()
 
     def fetch_embedding(self, asset_id: str) -> list[float] | None:
@@ -48,7 +45,8 @@ class ImmichDbReader:
         if not asset_id_list:
             return {}
 
-        with self.connection.cursor() as cursor:
+        connection = self._ensure_connection()
+        with connection.cursor() as cursor:
             cursor.execute(
                 '''
                 SELECT "assetId", "embedding"::text
@@ -60,3 +58,10 @@ class ImmichDbReader:
             rows = cursor.fetchall()
 
         return {asset_id: parse_embedding(embedding) for asset_id, embedding in rows}
+
+    def _ensure_connection(self) -> psycopg.Connection:
+        if self.connection is None:
+            self.connection = psycopg.connect(self.config.dsn, autocommit=True)
+            with self.connection.cursor() as cursor:
+                cursor.execute("SET default_transaction_read_only = on")
+        return self.connection
