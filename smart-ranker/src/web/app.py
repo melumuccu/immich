@@ -144,6 +144,13 @@ def create_app(
             )
         return snapshots
 
+    def _load_runtime_reset_token() -> str | None:
+        token_path = app.state.paths.runtime_reset_token_path()
+        if not token_path.exists():
+            return None
+        token = token_path.read_text(encoding="utf-8").strip()
+        return token or None
+
     def _load_settings() -> dict:
         return load_master_data(app.state.repository, app.state.profile_id)
 
@@ -336,6 +343,7 @@ def create_app(
         return {
             "schedules": settings["schedules"],
             "models": _load_models(),
+            "runtimeResetToken": _load_runtime_reset_token(),
         }
 
     @app.put("/api/settings/schedules")

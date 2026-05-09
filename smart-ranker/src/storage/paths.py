@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 STATE_DIR_ENV = "SMART_RANKER_STATE_DIR"
+RUNTIME_RESET_TOKEN_FILE_NAME = "runtime-reset-token.txt"
 
 
 def project_root() -> Path:
@@ -57,3 +58,6 @@ class StoragePaths:
 
     def runtime_directories(self) -> tuple[Path, ...]:
         return (self.db_dir, self.models_dir, self.snapshots_dir, self.logs_dir)
+
+    def runtime_reset_token_path(self) -> Path:
+        return self.state_dir / RUNTIME_RESET_TOKEN_FILE_NAME

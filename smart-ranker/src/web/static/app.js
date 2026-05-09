@@ -6,6 +6,7 @@ const DEFAULT_REVIEW_THRESHOLD = 0.5;
 const LIVE_RELOAD_ENDPOINT = "/api/dev/live-reload";
 const LIVE_RELOAD_DEFAULT_INTERVAL_MS = 1000;
 const JOB_HISTORY_STORAGE_KEY = "smart-ranker-job-history";
+const RUNTIME_RESET_TOKEN_STORAGE_KEY = "smart-ranker-runtime-reset-token";
 const MAX_JOB_HISTORY = 12;
 
 const normalizeRoute = (path) => {
@@ -47,6 +48,19 @@ const loadJobHistory = () => {
     return parsed.map((item) => normalizeStoredJobRun(item)).filter(Boolean);
   } catch {
     return [];
+  }
+};
+
+const loadRuntimeResetToken = () => {
+  if (typeof window === "undefined" || !("localStorage" in window)) {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(RUNTIME_RESET_TOKEN_STORAGE_KEY);
+    return raw ? String(raw) : null;
+  } catch {
+    return null;
   }
 };
 
@@ -99,6 +113,7 @@ const state = {
   ui: {
     currentRoute: normalizeRoute(window.location.pathname),
     jobHistory: loadJobHistory(),
+    runtimeResetToken: loadRuntimeResetToken(),
     selectedPersonGroupKey: null,
     personSearchQuery: "",
     personSearchResults: [],
@@ -203,6 +218,38 @@ const persistJobHistory = () => {
   } catch {
     // Ignore storage errors so the console still works in private browsing or quota pressure.
   }
+};
+
+const persistRuntimeResetToken = () => {
+  if (typeof window === "undefined" || !("localStorage" in window)) {
+    return;
+  }
+
+  try {
+    if (state.ui.runtimeResetToken) {
+      window.localStorage.setItem(RUNTIME_RESET_TOKEN_STORAGE_KEY, state.ui.runtimeResetToken);
+      return;
+    }
+    window.localStorage.removeItem(RUNTIME_RESET_TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors so the console still works in private browsing or quota pressure.
+  }
+};
+
+const syncJobHistoryWithRuntimeResetToken = (runtimeResetToken) => {
+  if (!runtimeResetToken) {
+    return;
+  }
+
+  const normalizedToken = String(runtimeResetToken);
+  if (state.ui.runtimeResetToken && state.ui.runtimeResetToken === normalizedToken) {
+    return;
+  }
+
+  state.ui.runtimeResetToken = normalizedToken;
+  state.ui.jobHistory = [];
+  persistJobHistory();
+  persistRuntimeResetToken();
 };
 
 const setStatus = (elementId, message, isError = false) => {
@@ -1186,6 +1233,8 @@ const refresh = async () => {
     fetchJson("/api/settings/jobs-models"),
     fetchJson("/api/event-ledger"),
   ]);
+
+  syncJobHistoryWithRuntimeResetToken(jobsModels.runtimeResetToken);
 
   state.settings.personGroups = (personGroupSettings.personGroups ?? []).map((group) => ({
     ...group,

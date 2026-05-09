@@ -371,6 +371,19 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(1, len(ledger["inferenceTraces"]))
             self.assertEqual(1, len(ledger["actionExecutionLogs"]))
 
+    def test_jobs_models_endpoint_includes_runtime_reset_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bootstrap_result = bootstrap_storage(state_dir=Path(temp_dir) / "state")
+            bootstrap_result.paths.runtime_reset_token_path().write_text("reset-token-1", encoding="utf-8")
+
+            app = create_app(state_dir=Path(temp_dir) / "state", profile_id="profile-1")
+            client = TestClient(app)
+
+            payload = client.get("/api/settings/jobs-models").json()
+
+            self.assertEqual([], payload["models"])
+            self.assertEqual("reset-token-1", payload["runtimeResetToken"])
+
     def test_live_reload_endpoint_is_dev_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             default_app = create_app(state_dir=Path(temp_dir) / "state", profile_id="profile-1")

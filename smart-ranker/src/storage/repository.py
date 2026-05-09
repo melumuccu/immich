@@ -69,6 +69,14 @@ class ActionExecutionLogRecord:
     executed_at: str
 
 
+RUNTIME_DATA_TABLES = (
+    "action_execution_log",
+    "feedback_event",
+    "inference_trace",
+    "collector_cursor",
+)
+
+
 class StorageRepository:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
@@ -810,3 +818,11 @@ class StorageRepository:
                 (profile_id,),
             ).fetchall()
         return rows
+
+    def clear_runtime_data(self) -> dict[str, int]:
+        deleted_rows: dict[str, int] = {}
+        with self._open() as connection:
+            for table_name in RUNTIME_DATA_TABLES:
+                cursor = connection.execute(f"DELETE FROM {table_name}")
+                deleted_rows[table_name] = max(cursor.rowcount, 0)
+        return deleted_rows

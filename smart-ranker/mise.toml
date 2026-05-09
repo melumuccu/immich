@@ -25,6 +25,12 @@ set +a
 ./.venv/bin/python -m smart_ranker seed-master-data --state-dir ./var/local
 """
 
+[tasks.reset-runtime-data]
+description = "collect/train/score/apply の実行データを消し、設定データは保持したまま初期状態へ戻す"
+run = """
+./.venv/bin/python -m smart_ranker reset-runtime-data --state-dir ./var/local
+"""
+
 [tasks.build]
 description = "Compose 経由で smart-ranker の Docker イメージをビルドする"
 run = """
