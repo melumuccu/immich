@@ -18,24 +18,57 @@
           <button data-job="score">score</button>
           <button data-job="apply">apply</button>
         </div>
+        <div class="hero-tools">
+          <button id="seed-defaults" class="button-secondary" type="button">seed defaults</button>
+          <p id="global-status" class="status-line">master data status will appear here</p>
+        </div>
         <pre id="job-output">job output will appear here</pre>
       </section>
 
       <section class="panel-grid">
         <article class="panel">
-          <h2>Person Group</h2>
-          <ul id="person-groups"></ul>
+          <div class="panel-header">
+            <div>
+              <h2>Person Group</h2>
+              <p class="panel-note">displayName を選んで member を追加、差し替え、削除する。Person 名の検索結果は Immich API から取得する。</p>
+            </div>
+            <button data-save="person-groups" class="button-secondary" type="button">save</button>
+          </div>
+          <div id="person-group-app" class="settings-app"></div>
+          <p id="person-groups-status" class="status-line">not loaded</p>
         </article>
         <article class="panel">
-          <h2>Categories &amp; Routing</h2>
-          <ul id="categories"></ul>
+          <div class="panel-header">
+            <div>
+              <h2>Categories &amp; Routing</h2>
+              <p class="panel-note">カテゴリはカードごとに有効化や表示名を調整し、routing rule は用途別フォームで編集する。</p>
+            </div>
+            <button data-save="categories-routing" class="button-secondary" type="button">save</button>
+          </div>
+          <div id="categories-routing-app" class="settings-app"></div>
+          <p id="categories-routing-status" class="status-line">not loaded</p>
         </article>
         <article class="panel">
-          <h2>Policies</h2>
-          <ul id="policies"></ul>
+          <div class="panel-header">
+            <div>
+              <h2>Policies</h2>
+              <p class="panel-note">review threshold、description 更新、Review Album の destination をフォームで編集する。</p>
+            </div>
+            <button data-save="policies" class="button-secondary" type="button">save</button>
+          </div>
+          <div id="policies-app" class="settings-app"></div>
+          <p id="policies-status" class="status-line">not loaded</p>
         </article>
         <article class="panel">
-          <h2>Jobs &amp; Models</h2>
+          <div class="panel-header">
+            <div>
+              <h2>Jobs &amp; Models</h2>
+              <p class="panel-note">job ごとの schedule をカードで調整し、train snapshot は下で読む。</p>
+            </div>
+            <button data-save="schedules" class="button-secondary" type="button">save</button>
+          </div>
+          <div id="jobs-models-app" class="settings-app"></div>
+          <p id="jobs-models-status" class="status-line">not loaded</p>
           <ul id="models"></ul>
         </article>
         <article class="panel panel-wide">

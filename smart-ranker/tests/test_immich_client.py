@@ -116,11 +116,47 @@ class ImmichClientTest(unittest.TestCase):
 
         self.assertEqual("GET", fake_session.calls[1]["method"])
         self.assertEqual("http://immich.local/api/search/person", fake_session.calls[1]["url"])
-        self.assertEqual({"name": "Kid", "withHidden": True}, fake_session.calls[1]["params"])
+        self.assertEqual({"name": "Kid", "withHidden": "true"}, fake_session.calls[1]["params"])
 
         self.assertEqual("GET", fake_session.calls[2]["method"])
         self.assertEqual("http://immich.local/api/people", fake_session.calls[2]["url"])
-        self.assertEqual({"page": 2, "size": 50, "withHidden": True}, fake_session.calls[2]["params"])
+        self.assertEqual({"page": 2, "size": 50, "withHidden": "true"}, fake_session.calls[2]["params"])
+
+    def test_people_search_falls_back_to_people_list_when_search_api_rejects_query(self) -> None:
+        fake_session = FakeRequestsSession(
+            [
+                FakeResponse(400, {"message": "unsupported search endpoint"}),
+                FakeResponse(
+                    200,
+                    {
+                        "people": [
+                            {
+                                "id": "person-1",
+                                "name": "椎乃",
+                                "isHidden": False,
+                                "faceAssetId": "asset-1",
+                            },
+                            {
+                                "id": "person-2",
+                                "name": "Family",
+                                "isHidden": False,
+                                "faceAssetId": "asset-2",
+                            },
+                        ]
+                    },
+                ),
+            ]
+        )
+        session = ImmichSession(base_url="http://immich.local", api_key="secret", session=fake_session)
+        people_client = PeopleClient(session)
+
+        people = people_client.search_people("椎乃", limit=16)
+
+        self.assertEqual(["person-1"], [person.id for person in people])
+        self.assertEqual("http://immich.local/api/search/person", fake_session.calls[0]["url"])
+        self.assertEqual({"name": "椎乃", "withHidden": "false"}, fake_session.calls[0]["params"])
+        self.assertEqual("http://immich.local/api/people", fake_session.calls[1]["url"])
+        self.assertEqual({"page": 1, "size": 100, "withHidden": "false"}, fake_session.calls[1]["params"])
 
     def test_action_write_client_uses_expected_routes(self) -> None:
         fake_session = FakeRequestsSession(

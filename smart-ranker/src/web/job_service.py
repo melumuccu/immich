@@ -14,11 +14,11 @@ from smart_ranker.feature_pipeline import (
     FeatureAssembler,
     LabelResolution,
     LabelResolver,
-    LabelResolverConfig,
 )
 from smart_ranker.immich_client import ActionWriteClient, AssetReadClient, ImmichSession
 from smart_ranker.immich_db_reader import ImmichDbConfig, ImmichDbReader
 from smart_ranker.inference import ActionExecutor, ApplyConfig, InferenceJob
+from smart_ranker.master_data import load_runtime_settings
 from smart_ranker.storage.paths import StoragePaths
 from smart_ranker.storage.repository import StorageRepository
 from smart_ranker.training import TrainingJob, TrainingResult, WeakPositiveSignal
@@ -111,6 +111,7 @@ class SmartRankerJobRunner:
         immich_user_id: str,
         review_album_resource_id: str | None,
         review_threshold: float,
+        update_description: bool,
         now_factory: Callable[[], str],
     ) -> None:
         self.storage_paths = storage_paths
@@ -124,6 +125,7 @@ class SmartRankerJobRunner:
         self.immich_user_id = immich_user_id
         self.review_album_resource_id = review_album_resource_id
         self.review_threshold = review_threshold
+        self.update_description = update_description
         self.now_factory = now_factory
         self.cache = JobRuntimeCache()
 
@@ -245,23 +247,50 @@ class SmartRankerJobRunner:
 
     def _ensure_apply_config(self, payload: dict[str, Any]) -> ApplyConfig:
         self.repository.ensure_profile(profile_id=self.profile_id, immich_user_id=self.immich_user_id)
-        action_policy_id = self.repository.ensure_action_policy(
-            policy_id=f"{self.profile_id}-review-policy",
-            profile_id=self.profile_id,
-            policy_key=DEFAULT_POLICY_KEY,
-            display_name=DEFAULT_POLICY_DISPLAY_NAME,
-            execution_mode="manual",
+        policy_rows = self.repository.list_action_policies(self.profile_id)
+        action_policy_id = next(
+            (str(row["id"]) for row in policy_rows if row["policy_key"] == DEFAULT_POLICY_KEY),
+            None,
         )
-        description_destination_id = self.repository.ensure_action_destination(
-            destination_id=f"{self.profile_id}-asset-description",
-            profile_id=self.profile_id,
-            destination_key=DEFAULT_DESCRIPTION_DESTINATION_KEY,
-            destination_type="asset_description",
-            immich_resource_id=DEFAULT_DESCRIPTION_RESOURCE_ID,
+        if action_policy_id is None:
+            action_policy_id = self.repository.ensure_action_policy(
+                policy_id=f"{self.profile_id}-review-policy",
+                profile_id=self.profile_id,
+                policy_key=DEFAULT_POLICY_KEY,
+                display_name=DEFAULT_POLICY_DISPLAY_NAME,
+                execution_mode="manual",
+            )
+
+        destination_rows = self.repository.list_action_destinations(self.profile_id)
+        description_destination_row = next(
+            (row for row in destination_rows if row["destination_key"] == DEFAULT_DESCRIPTION_DESTINATION_KEY),
+            None,
         )
+        if description_destination_row is None:
+            description_destination_id = self.repository.ensure_action_destination(
+                destination_id=f"{self.profile_id}-asset-description",
+                profile_id=self.profile_id,
+                destination_key=DEFAULT_DESCRIPTION_DESTINATION_KEY,
+                destination_type="asset_description",
+                immich_resource_id=DEFAULT_DESCRIPTION_RESOURCE_ID,
+            )
+            description_destination_enabled = payload.get("updateDescription", self.update_description)
+        else:
+            description_destination_id = str(description_destination_row["id"])
+            description_destination_enabled = bool(description_destination_row["enabled"]) and bool(
+                payload.get("updateDescription", self.update_description)
+            )
 
         review_album_resource_id = payload.get("reviewAlbumResourceId", self.review_album_resource_id)
-        review_album_destination_id: str | None = None
+        review_album_destination_row = next(
+            (row for row in destination_rows if row["destination_key"] == DEFAULT_REVIEW_DESTINATION_KEY),
+            None,
+        )
+        review_album_destination_id = (
+            str(review_album_destination_row["id"])
+            if review_album_destination_row is not None and bool(review_album_destination_row["enabled"])
+            else None
+        )
         if review_album_resource_id:
             review_album_destination_id = self.repository.ensure_action_destination(
                 destination_id=f"{self.profile_id}-review-album",
@@ -271,7 +300,6 @@ class SmartRankerJobRunner:
                 immich_resource_id=str(review_album_resource_id),
             )
 
-        description_destination_enabled = payload.get("updateDescription", True)
         review_threshold = float(payload.get("reviewThreshold", self.review_threshold))
 
         return ApplyConfig(
@@ -391,7 +419,15 @@ def build_job_service(
             raise JobConfigurationError(f"Missing runtime configuration: {IMMICH_USER_ID_ENV}")
 
         repository.ensure_profile(profile_id=profile_id, immich_user_id=immich_user_id)
-        label_resolver_config = LabelResolverConfig()
+        runtime_settings = load_runtime_settings(
+            repository,
+            profile_id=profile_id,
+            default_review_album_resource_id=review_album_resource_id,
+            default_review_threshold=review_threshold,
+        )
+        review_album_resource_id = runtime_settings.review_album_resource_id
+        review_threshold = runtime_settings.review_threshold
+        label_resolver_config = runtime_settings.label_resolver_config
         label_resolver = LabelResolver(label_resolver_config)
         feature_assembler = FeatureAssembler(label_resolver_config.known_category_keys)
         collector = AssetDiffCollector(
@@ -421,6 +457,7 @@ def build_job_service(
             immich_user_id=immich_user_id,
             review_album_resource_id=review_album_resource_id,
             review_threshold=review_threshold,
+            update_description=runtime_settings.update_description,
             now_factory=now_factory,
         )
         return JobService(handlers=runner.handlers(), now_factory=now_factory)

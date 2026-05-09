@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,8 +9,13 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from smart_ranker.immich_client import ActionResult, AssetSnapshot, SearchResult
+from smart_ranker.immich_client import ActionResult, AssetSnapshot, PersonSnapshot, SearchResult
+from smart_ranker.master_data import load_runtime_settings
 from smart_ranker.storage import bootstrap_storage
+from smart_ranker.web.app import (
+    LIVE_RELOAD_ACCESS_LOG_FILTER,
+    UVICORN_ACCESS_LOGGER_NAME,
+)
 from smart_ranker.storage.repository import (
     ActionExecutionLogRecord,
     FeedbackEventRecord,
@@ -53,6 +59,42 @@ class FakeActionClient:
     def update_asset(self, asset_id: str, payload: dict[str, object]) -> ActionResult:
         self.calls.append(("update_asset", asset_id, payload))
         return ActionResult(status_code=200, ok=True, payload={"assetId": asset_id, **payload})
+
+
+class FakePeopleClient:
+    def __init__(self) -> None:
+        self.search_calls: list[tuple[str, bool, int | None]] = []
+        self.list_calls: list[tuple[int, int, bool]] = []
+
+    def search_people(
+        self,
+        name: str,
+        *,
+        with_hidden: bool = False,
+        limit: int | None = None,
+    ) -> list[PersonSnapshot]:
+        self.search_calls.append((name, with_hidden, limit))
+        return [
+            PersonSnapshot(
+                id="person-1",
+                name="Kid",
+                is_hidden=with_hidden,
+                face_asset_id="face-1",
+                payload={"id": "person-1"},
+            )
+        ]
+
+    def list_people(self, *, page: int = 1, size: int = 500, with_hidden: bool = False) -> list[PersonSnapshot]:
+        self.list_calls.append((page, size, with_hidden))
+        return [
+            PersonSnapshot(
+                id="person-2",
+                name="Family",
+                is_hidden=with_hidden,
+                face_asset_id=None,
+                payload={"id": "person-2"},
+            )
+        ]
 
 
 def make_asset(
@@ -324,6 +366,119 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(1, len(ledger["feedbackEvents"]))
             self.assertEqual(1, len(ledger["inferenceTraces"]))
             self.assertEqual(1, len(ledger["actionExecutionLogs"]))
+
+    def test_live_reload_endpoint_is_dev_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            default_app = create_app(state_dir=Path(temp_dir) / "state", profile_id="profile-1")
+            default_client = TestClient(default_app)
+
+            disabled_payload = default_client.get("/api/dev/live-reload").json()
+            self.assertFalse(disabled_payload["enabled"])
+            self.assertIsNone(disabled_payload["token"])
+
+            with patch.dict("os.environ", {"SMART_RANKER_LIVE_RELOAD": "1"}, clear=False):
+                live_reload_app = create_app(state_dir=Path(temp_dir) / "state-live", profile_id="profile-1")
+
+            live_reload_client = TestClient(live_reload_app)
+            enabled_payload = live_reload_client.get("/api/dev/live-reload").json()
+
+            self.assertTrue(enabled_payload["enabled"])
+            self.assertGreater(enabled_payload["intervalMs"], 0)
+            self.assertTrue(enabled_payload["token"])
+
+    def test_live_reload_filter_is_attached_only_when_enabled(self) -> None:
+        access_logger = logging.getLogger(UVICORN_ACCESS_LOGGER_NAME)
+        access_logger.removeFilter(LIVE_RELOAD_ACCESS_LOG_FILTER)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            create_app(state_dir=Path(temp_dir) / "state-disabled", profile_id="profile-1")
+            self.assertNotIn(LIVE_RELOAD_ACCESS_LOG_FILTER, access_logger.filters)
+
+            with patch.dict("os.environ", {"SMART_RANKER_LIVE_RELOAD": "1"}, clear=False):
+                create_app(state_dir=Path(temp_dir) / "state-enabled", profile_id="profile-1")
+
+            self.assertIn(LIVE_RELOAD_ACCESS_LOG_FILTER, access_logger.filters)
+
+        access_logger.removeFilter(LIVE_RELOAD_ACCESS_LOG_FILTER)
+
+    def test_people_search_endpoint_uses_injected_people_client(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            people_client = FakePeopleClient()
+            app = create_app(
+                state_dir=Path(temp_dir) / "state",
+                profile_id="profile-1",
+                people_client=people_client,
+            )
+            client = TestClient(app)
+
+            search_response = client.get("/api/immich/people", params={"q": "Kid", "with_hidden": True, "limit": 10})
+            list_response = client.get("/api/immich/people", params={"limit": 5})
+
+            self.assertEqual(200, search_response.status_code)
+            self.assertEqual("person-1", search_response.json()["items"][0]["id"])
+            self.assertEqual(("Kid", True, 10), people_client.search_calls[0])
+
+            self.assertEqual(200, list_response.status_code)
+            self.assertEqual("person-2", list_response.json()["items"][0]["id"])
+            self.assertEqual((1, 5, False), people_client.list_calls[0])
+
+    def test_settings_endpoints_can_seed_and_update_master_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = Path(temp_dir) / "state"
+            bootstrap_result = bootstrap_storage(state_dir=state_dir)
+            repository = StorageRepository(bootstrap_result.paths.db_path)
+            repository.insert_profile(profile_id="profile-1", immich_user_id="immich-user-1")
+
+            with patch.dict(
+                "os.environ",
+                {
+                    "SMART_RANKER_IMMICH_BASE_URL": "http://127.0.0.1:2283",
+                    "SMART_RANKER_IMMICH_API_KEY": "dummy",
+                    "SMART_RANKER_IMMICH_DB_DSN": "postgresql://immich:password@127.0.0.1:5432/immich",
+                    "SMART_RANKER_IMMICH_USER_ID": "immich-user-1",
+                },
+                clear=False,
+            ):
+                app = create_app(state_dir=state_dir, profile_id="profile-1")
+
+            client = TestClient(app)
+
+            seed_response = client.post(
+                "/api/settings/seed-defaults",
+                json={"reviewAlbumResourceId": "album-9", "reviewThreshold": 0.25},
+            )
+            self.assertEqual(200, seed_response.status_code)
+            seed_payload = seed_response.json()
+            self.assertEqual(2, len(seed_payload["personGroups"]))
+            self.assertEqual(8, len(seed_payload["categories"]))
+            self.assertEqual(9, len(seed_payload["routingRules"]))
+            self.assertEqual(4, len(seed_payload["schedules"]))
+
+            groups_payload = client.get("/api/settings/person-groups").json()
+            groups_payload["personGroups"][0]["members"] = [
+                {"immichPersonId": "person-1", "immichPersonName": "Alice"}
+            ]
+            groups_response = client.put("/api/settings/person-groups", json=groups_payload)
+            self.assertEqual(200, groups_response.status_code)
+            self.assertEqual(
+                "person-1",
+                groups_response.json()["personGroups"][0]["members"][0]["immichPersonId"],
+            )
+
+            policies_payload = client.get("/api/settings/policies").json()
+            policies_payload["policies"][0]["display"]["reviewThreshold"] = 0.33
+            policies_response = client.put("/api/settings/policies", json=policies_payload)
+            self.assertEqual(200, policies_response.status_code)
+
+            jobs_models = client.get("/api/settings/jobs-models").json()
+            self.assertEqual(4, len(jobs_models["schedules"]))
+
+            runtime_settings = load_runtime_settings(repository, profile_id="profile-1")
+            self.assertEqual(0.33, runtime_settings.review_threshold)
+            self.assertEqual(
+                frozenset({"person-1"}),
+                runtime_settings.label_resolver_config.person_labels.family_person_ids,
+            )
 
 
 if __name__ == "__main__":

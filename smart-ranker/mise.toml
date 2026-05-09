@@ -15,6 +15,16 @@ run = """
 ./.venv/bin/python -m smart_ranker bootstrap-storage --state-dir ./var/local
 """
 
+[tasks.seed-master-data]
+description = "設計書準拠の初期 master data を SQLite へ投入する"
+run = """
+set -eu
+set -a
+. ../.env
+set +a
+./.venv/bin/python -m smart_ranker seed-master-data --state-dir ./var/local
+"""
+
 [tasks.build]
 description = "Compose 経由で smart-ranker の Docker イメージをビルドする"
 run = """

@@ -54,6 +54,8 @@
 
    Smart Ranker は Compose network 内で `immich-server:2283` と `database:5432` を使うため、PostgreSQL の host 側 port 公開は不要。
 
+   Smart Ranker の GUI 開発では hot reload と live reload を有効にしている。`smart-ranker/src/web` 配下の Python と HTML/CSS/JS を更新すると、コンテナ内の Uvicorn が再読込した後にブラウザも自動で再読み込みされる。
+
    確認先:
 
    - Immich: `http://localhost:2283`

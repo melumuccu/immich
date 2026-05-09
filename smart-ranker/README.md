@@ -3,8 +3,10 @@
 ## 現在できる確認
 
 - SQLite の初期化
+- 設計書準拠の初期 master data 投入
 - Compose network 内での起動
 - 最小 GUI の起動
+- GUI からの Person Group / Categories & Routing / Policies / Jobs 設定更新
 - `collect`, `train`, `score`, `apply` の手動実行
 - unittest 一式の実行
 
@@ -106,6 +108,21 @@ mise run bootstrap
 - `db_path=.../smart-ranker/var/local/db/smart-ranker.sqlite3`
 - `applied_migrations=0001_initial_storage.sql`
 
+1. 初期 master data を投入する。
+
+```bash
+mise run seed-master-data
+```
+
+期待値:
+
+- `person_groups=2`
+- `categories=8`
+- `routing_rules=9`
+- `policies=1`
+- `destinations=2`
+- `schedules=4`
+
 ## 最短の動作確認
 
 1. <span id="step-start-service"></span>Smart Ranker を Compose network 内で起動する。
@@ -124,6 +141,7 @@ mise run up
 - 起動後のログ確認は `mise run logs`
 - foreground で起動したい場合は `mise run dev`
 - `mise run restart` は `smart-ranker` サービスだけを再作成する。依存サービスは既に起動済み前提
+- Compose 起動中は `src/web` 配下の Python と HTML/CSS/JS が live reload 対象。保存後にブラウザが自動で再読み込みされる
 
 1. ブラウザで最小 GUI を開く。
 
@@ -134,11 +152,16 @@ http://127.0.0.1:8010/
 期待値:
 
 - `Smart Ranker Console` が表示される
-- `Person Group`
-- `Categories & Routing`
-- `Policies`
-- `Jobs & Models`
+- `Person Group` に seed 済み JSON が入る
+- `Categories & Routing` に categories と routingRules の JSON が入る
+- `Policies` に review policy と destinations の JSON が入る
+- `Jobs & Models` に schedules JSON と model snapshot 一覧が出る
 - `Event Ledger`
+
+補足:
+
+- 画面右上の `seed defaults` からも既定 master data を再投入できる
+- JSON を編集して `save` を押すと backend 側の job 設定を再読込する
 
 1. <span id="step-run-train"></span>train ジョブを実行する。
 
@@ -166,6 +189,7 @@ JOB_RUN_ID=<jobRunId> mise run job-status
 ## よく使う task
 
 - `mise run review-album-id`: アルバム名から ID を検索する
+- `mise run seed-master-data`: 設計書準拠の初期 master data を投入する
 
 ## 引数つき task
 

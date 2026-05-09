@@ -22,6 +22,22 @@ class ResponseEnvelope:
     payload: Any
 
 
+def _normalize_query_value(value: Any) -> Any:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return [_normalize_query_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_normalize_query_value(item) for item in value)
+    return value
+
+
+def _normalize_query_params(params: dict[str, Any] | None) -> dict[str, Any] | None:
+    if params is None:
+        return None
+    return {key: _normalize_query_value(value) for key, value in params.items()}
+
+
 class ImmichSession:
     def __init__(
         self,
@@ -69,6 +85,7 @@ class ImmichSession:
             "Accept": "application/json",
             "x-api-key": self.api_key,
         }
+        normalized_params = _normalize_query_params(params)
 
         attempts = self.read_retries + 1 if retry else 1
         response: requests.Response | None = None
@@ -78,7 +95,7 @@ class ImmichSession:
                 method=method,
                 url=url,
                 headers=headers,
-                params=params,
+                params=normalized_params,
                 json=json_body,
                 timeout=self.timeout,
             )

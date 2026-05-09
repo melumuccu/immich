@@ -5,7 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,10 @@ class ActionExecutionLogRecord:
 class StorageRepository:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
+
+    @staticmethod
+    def _dump_json(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=True, sort_keys=True)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -218,6 +222,14 @@ class StorageRepository:
         assert row is not None
         return str(row["id"])
 
+    def get_profile(self, profile_id: str) -> sqlite3.Row | None:
+        with self._open() as connection:
+            row = connection.execute(
+                "SELECT * FROM ranker_profile WHERE id = ?",
+                (profile_id,),
+            ).fetchone()
+        return row
+
     def insert_person_group(
         self,
         *,
@@ -236,6 +248,90 @@ class StorageRepository:
                 """,
                 (group_id, profile_id, group_key, display_name, group_type),
             )
+
+    def upsert_person_group(
+        self,
+        *,
+        group_id: str,
+        profile_id: str,
+        group_key: str,
+        display_name: str,
+        group_type: str,
+        aliases: Sequence[str] | None = None,
+        enabled: bool = True,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO person_group (
+                  id, profile_id, group_key, display_name, group_type, aliases_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, group_key) DO UPDATE SET
+                  display_name = excluded.display_name,
+                  group_type = excluded.group_type,
+                  aliases_json = excluded.aliases_json,
+                  enabled = excluded.enabled
+                """,
+                (
+                    group_id,
+                    profile_id,
+                    group_key,
+                    display_name,
+                    group_type,
+                    self._dump_json(list(aliases or [])),
+                    int(enabled),
+                ),
+            )
+            row = connection.execute(
+                "SELECT id FROM person_group WHERE profile_id = ? AND group_key = ?",
+                (profile_id, group_key),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
+
+    def replace_person_group_members(
+        self,
+        person_group_id: str,
+        members: Sequence[tuple[str, str, str, int, int]],
+    ) -> None:
+        with self._open() as connection:
+            connection.execute(
+                "DELETE FROM person_group_member WHERE person_group_id = ?",
+                (person_group_id,),
+            )
+            connection.executemany(
+                """
+                INSERT INTO person_group_member (
+                  id, person_group_id, immich_person_id, immich_person_name, sort_order, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        member_id,
+                        person_group_id,
+                        immich_person_id,
+                        immich_person_name,
+                        sort_order,
+                        enabled,
+                    )
+                    for member_id, immich_person_id, immich_person_name, sort_order, enabled in members
+                ],
+            )
+
+    def list_person_group_members(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                """
+                SELECT pgm.*, pg.group_key
+                FROM person_group_member pgm
+                JOIN person_group pg ON pg.id = pgm.person_group_id
+                WHERE pg.profile_id = ?
+                ORDER BY pg.display_name ASC, pgm.sort_order ASC, pgm.immich_person_name ASC
+                """,
+                (profile_id,),
+            ).fetchall()
+        return rows
 
     def insert_category(
         self,
@@ -256,6 +352,50 @@ class StorageRepository:
                 """,
                 (category_id, profile_id, category_key, display_name, category_type, media_scope),
             )
+
+    def upsert_category(
+        self,
+        *,
+        category_id: str,
+        profile_id: str,
+        category_key: str,
+        display_name: str,
+        category_type: str,
+        media_scope: str,
+        aliases: Sequence[str] | None = None,
+        enabled: bool = True,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO category (
+                  id, profile_id, category_key, display_name, category_type, media_scope, aliases_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, category_key) DO UPDATE SET
+                  display_name = excluded.display_name,
+                  category_type = excluded.category_type,
+                  media_scope = excluded.media_scope,
+                  aliases_json = excluded.aliases_json,
+                  enabled = excluded.enabled
+                """,
+                (
+                    category_id,
+                    profile_id,
+                    category_key,
+                    display_name,
+                    category_type,
+                    media_scope,
+                    self._dump_json(list(aliases or [])),
+                    int(enabled),
+                ),
+            )
+            row = connection.execute(
+                "SELECT id FROM category WHERE profile_id = ? AND category_key = ?",
+                (profile_id, category_key),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
 
     def insert_action_policy(
         self,
@@ -304,6 +444,47 @@ class StorageRepository:
         assert row is not None
         return str(row["id"])
 
+    def upsert_action_policy(
+        self,
+        *,
+        policy_id: str,
+        profile_id: str,
+        policy_key: str,
+        display_name: str,
+        execution_mode: str,
+        display: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO action_policy (
+                  id, profile_id, policy_key, display_name, execution_mode, display_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, policy_key) DO UPDATE SET
+                  display_name = excluded.display_name,
+                  execution_mode = excluded.execution_mode,
+                  display_json = excluded.display_json,
+                  enabled = excluded.enabled
+                """,
+                (
+                    policy_id,
+                    profile_id,
+                    policy_key,
+                    display_name,
+                    execution_mode,
+                    self._dump_json(display or {}),
+                    int(enabled),
+                ),
+            )
+            row = connection.execute(
+                "SELECT id FROM action_policy WHERE profile_id = ? AND policy_key = ?",
+                (profile_id, policy_key),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
+
     def list_person_groups(self, profile_id: str) -> list[sqlite3.Row]:
         with self._open() as connection:
             rows = connection.execute(
@@ -316,6 +497,64 @@ class StorageRepository:
         with self._open() as connection:
             rows = connection.execute(
                 "SELECT * FROM category WHERE profile_id = ? ORDER BY display_name ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def upsert_routing_rule(
+        self,
+        *,
+        rule_id: str,
+        profile_id: str,
+        category_id: str,
+        rule_name: str,
+        priority: int,
+        match: dict[str, Any] | None = None,
+        assignment_mode: str,
+        stop_after_match: bool,
+        enabled: bool = True,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO routing_rule (
+                  id, profile_id, category_id, rule_name, priority, match_json,
+                  assignment_mode, stop_after_match, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  profile_id = excluded.profile_id,
+                  category_id = excluded.category_id,
+                  rule_name = excluded.rule_name,
+                  priority = excluded.priority,
+                  match_json = excluded.match_json,
+                  assignment_mode = excluded.assignment_mode,
+                  stop_after_match = excluded.stop_after_match,
+                  enabled = excluded.enabled
+                """,
+                (
+                    rule_id,
+                    profile_id,
+                    category_id,
+                    rule_name,
+                    priority,
+                    self._dump_json(match or {}),
+                    assignment_mode,
+                    int(stop_after_match),
+                    int(enabled),
+                ),
+            )
+        return rule_id
+
+    def list_routing_rules(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                """
+                SELECT rr.*, c.category_key
+                FROM routing_rule rr
+                JOIN category c ON c.id = rr.category_id
+                WHERE rr.profile_id = ?
+                ORDER BY rr.priority ASC, rr.rule_name ASC
+                """,
                 (profile_id,),
             ).fetchall()
         return rows
@@ -393,6 +632,107 @@ class StorageRepository:
 
         assert row is not None
         return str(row["id"])
+
+    def upsert_action_destination(
+        self,
+        *,
+        destination_id: str,
+        profile_id: str,
+        destination_key: str,
+        destination_type: str,
+        immich_resource_id: str,
+        config: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO action_destination (
+                  id, profile_id, destination_key, destination_type, immich_resource_id, config_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, destination_key) DO UPDATE SET
+                  destination_type = excluded.destination_type,
+                  immich_resource_id = excluded.immich_resource_id,
+                  config_json = excluded.config_json,
+                  enabled = excluded.enabled
+                """,
+                (
+                    destination_id,
+                    profile_id,
+                    destination_key,
+                    destination_type,
+                    immich_resource_id,
+                    self._dump_json(config or {}),
+                    int(enabled),
+                ),
+            )
+            row = connection.execute(
+                "SELECT id FROM action_destination WHERE profile_id = ? AND destination_key = ?",
+                (profile_id, destination_key),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
+
+    def list_action_destinations(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM action_destination WHERE profile_id = ? ORDER BY destination_key ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def upsert_execution_schedule(
+        self,
+        *,
+        schedule_id: str,
+        profile_id: str,
+        job_type: str,
+        run_mode: str,
+        cron_expr: str | None,
+        dry_run: bool,
+        batch_size: int,
+        enabled: bool = True,
+    ) -> str:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO execution_schedule (
+                  id, profile_id, job_type, run_mode, cron_expr, dry_run, batch_size, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, job_type) DO UPDATE SET
+                  run_mode = excluded.run_mode,
+                  cron_expr = excluded.cron_expr,
+                  dry_run = excluded.dry_run,
+                  batch_size = excluded.batch_size,
+                  enabled = excluded.enabled
+                """,
+                (
+                    schedule_id,
+                    profile_id,
+                    job_type,
+                    run_mode,
+                    cron_expr,
+                    int(dry_run),
+                    batch_size,
+                    int(enabled),
+                ),
+            )
+            row = connection.execute(
+                "SELECT id FROM execution_schedule WHERE profile_id = ? AND job_type = ?",
+                (profile_id, job_type),
+            ).fetchone()
+
+        assert row is not None
+        return str(row["id"])
+
+    def list_execution_schedules(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM execution_schedule WHERE profile_id = ? ORDER BY job_type ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
 
     def insert_inference_trace(self, record: InferenceTraceRecord) -> None:
         with self._open() as connection:

@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -10,8 +10,19 @@ COPY pyproject.toml README.md ./
 COPY docs ./docs
 COPY src ./src
 
-RUN python -m pip install --upgrade pip \
-    && python -m pip install .
+RUN python -m pip install --upgrade pip
+
+FROM base AS dev
+
+RUN python -m pip install -e .
+
+EXPOSE 8010
+
+CMD ["python", "-m", "uvicorn", "smart_ranker.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8010", "--reload", "--reload-dir", "/app/src"]
+
+FROM base AS runtime
+
+RUN python -m pip install .
 
 EXPOSE 8010
 

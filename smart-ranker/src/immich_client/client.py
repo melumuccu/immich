@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -10,7 +11,7 @@ from smart_ranker.immich_client.normalizers import (
     normalize_person_snapshot,
     normalize_search_result,
 )
-from smart_ranker.immich_client.session import ImmichSession
+from smart_ranker.immich_client.session import ImmichHttpError, ImmichSession
 
 
 @dataclass(frozen=True)
@@ -63,12 +64,62 @@ class PeopleClient:
         people_payload = response.payload.get("people", response.payload if isinstance(response.payload, list) else [])
         return [normalize_person_snapshot(person) for person in people_payload]
 
-    def search_people(self, name: str, *, with_hidden: bool = False) -> list[PersonSnapshot]:
-        response = self.session.get(
-            self.capabilities.search_person_path,
-            params={"name": name, "withHidden": with_hidden},
-        )
-        return [normalize_person_snapshot(person) for person in response.payload]
+    def search_people(
+        self,
+        name: str,
+        *,
+        with_hidden: bool = False,
+        limit: int | None = None,
+    ) -> list[PersonSnapshot]:
+        normalized_name = _normalize_person_query(name)
+        if not normalized_name:
+            return []
+
+        try:
+            response = self.session.get(
+                self.capabilities.search_person_path,
+                params={"name": name, "withHidden": with_hidden},
+            )
+        except ImmichHttpError as error:
+            if error.status_code not in {400, 404}:
+                raise
+            return self._search_people_via_listing(
+                normalized_name,
+                with_hidden=with_hidden,
+                limit=limit,
+            )
+
+        return [normalize_person_snapshot(person) for person in response.payload][:limit]
+
+    def _search_people_via_listing(
+        self,
+        normalized_name: str,
+        *,
+        with_hidden: bool,
+        limit: int | None,
+    ) -> list[PersonSnapshot]:
+        page = 1
+        page_size = min(max(limit or 100, 100), 500)
+        matches: list[PersonSnapshot] = []
+
+        while True:
+            people = self.list_people(page=page, size=page_size, with_hidden=with_hidden)
+            for person in people:
+                if normalized_name in _normalize_person_query(person.name):
+                    matches.append(person)
+                    if limit is not None and len(matches) >= limit:
+                        return matches
+
+            if len(people) < page_size:
+                return matches
+
+            page += 1
+
+
+def _normalize_person_query(value: str | None) -> str:
+    if value is None:
+        return ""
+    return unicodedata.normalize("NFKC", value).casefold().strip()
 
 
 class ActionWriteClient:
