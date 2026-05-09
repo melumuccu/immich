@@ -10,10 +10,10 @@
     - [x] `collector_cursor` を読み、`updatedAfter` と `trashedAfter` を使った差分取得を実装する。
     - [x] 削除候補アルバム差分、または GUI 手動除外入力から `delete_candidate_rescued` の `feedback_event` を追記する。
     - [x] run 成功時のみ `collector_cursor` を更新する。
-- [ ] ラベル解決と特徴量組み立ての実装
-    - [ ] 人物系は People メタデータで決定し、書類、スクリーンショットは OCR、ファイル名、パス、タグの機械的ルールで判定する。
-    - [ ] 風景、ペットは `search/smart` の結果を弱ラベルとして取り込み、asset ごとの候補ラベル集合を作る。
-    - [ ] CLIP embedding と通常メタデータを学習、推論用マトリクスへ変換する。
+- [x] ラベル解決と特徴量組み立ての実装
+    - [x] 人物系は People メタデータで決定し、書類、スクリーンショットは OCR、ファイル名、パス、タグの機械的ルールで判定する。
+    - [x] 風景、ペットは `search/smart` の結果を弱ラベルとして取り込み、asset ごとの候補ラベル集合を作る。
+    - [x] CLIP embedding と通常メタデータを学習、推論用マトリクスへ変換する。
 - [ ] 学習ジョブの実装
     - [ ] `trash > archive > favorite > weak positive > unlabeled` の優先順位で教師ラベルを再構成する。
     - [ ] 汎用モデル 1 本と、人物系 1 本、非人物系複数本の Logistic Regression を学習し、`.pkl` と設定スナップショットを保存する。
