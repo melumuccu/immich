@@ -14,9 +14,9 @@
     - [x] 人物系は People メタデータで決定し、書類、スクリーンショットは OCR、ファイル名、パス、タグの機械的ルールで判定する。
     - [x] 風景、ペットは `search/smart` の結果を弱ラベルとして取り込み、asset ごとの候補ラベル集合を作る。
     - [x] CLIP embedding と通常メタデータを学習、推論用マトリクスへ変換する。
-- [ ] 学習ジョブの実装
-    - [ ] `trash > archive > favorite > weak positive > unlabeled` の優先順位で教師ラベルを再構成する。
-    - [ ] 汎用モデル 1 本と、人物系 1 本、非人物系複数本の Logistic Regression を学習し、`.pkl` と設定スナップショットを保存する。
+- [x] 学習ジョブの実装
+    - [x] `trash > archive > favorite > weak positive > unlabeled` の優先順位で教師ラベルを再構成する。
+    - [x] 汎用モデル 1 本と、人物系 1 本、非人物系複数本の Logistic Regression を学習し、`.pkl` と設定スナップショットを保存する。
 - [ ] 推論、反映ジョブの実装
     - [ ] `isTrashed: false` かつ `visibility: timeline` の asset を対象にスコア算出し、`inference_trace` へ保存する。
     - [ ] dry-run 付きで `action_execution_log` を残し、Review アルバム追加や description 更新を `Action Executor` から実行する。
