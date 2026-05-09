@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def apply_migrations(db_path: Path, migrations_dir: Path) -> MigrationResult:
     applied: list[str] = []
     skipped: list[str] = []
 
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         _ensure_migration_table(connection)
         existing_versions = _load_applied_versions(connection)

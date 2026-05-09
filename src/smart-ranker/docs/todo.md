@@ -17,9 +17,9 @@
 - [x] 学習ジョブの実装
     - [x] `trash > archive > favorite > weak positive > unlabeled` の優先順位で教師ラベルを再構成する。
     - [x] 汎用モデル 1 本と、人物系 1 本、非人物系複数本の Logistic Regression を学習し、`.pkl` と設定スナップショットを保存する。
-- [ ] 推論、反映ジョブの実装
-    - [ ] `isTrashed: false` かつ `visibility: timeline` の asset を対象にスコア算出し、`inference_trace` へ保存する。
-    - [ ] dry-run 付きで `action_execution_log` を残し、Review アルバム追加や description 更新を `Action Executor` から実行する。
+- [x] 推論、反映ジョブの実装
+    - [x] `isTrashed: false` かつ `visibility: timeline` の asset を対象にスコア算出し、`inference_trace` へ保存する。
+    - [x] dry-run 付きで `action_execution_log` を残し、Review アルバム追加や description 更新を `Action Executor` から実行する。
 - [ ] API と最小 GUI の実装
     - [ ] 手動実行 API は `jobRunId` を返す形で `collect`, `train`, `score`, `apply` を先に用意する。
     - [ ] GUI は Person Group、Categories & Routing、Policies、Jobs & Models、Event Ledger の最小画面から着手する。

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,39 @@ class FeedbackEventRecord:
     note: str | None = None
 
 
+@dataclass(frozen=True)
+class InferenceTraceRecord:
+    id: str
+    profile_id: str
+    immich_asset_id: str
+    trigger_type: str
+    execution_mode: str
+    candidate_categories: list[str]
+    score: dict[str, float]
+    final_score: float
+    threshold_snapshot: dict[str, Any]
+    protected: bool
+    occurred_at: str
+
+
+@dataclass(frozen=True)
+class ActionExecutionLogRecord:
+    id: str
+    profile_id: str
+    inference_trace_id: str
+    action_policy_id: str
+    destination_id: str
+    immich_asset_id: str
+    action_type: str
+    execution_mode: str
+    dry_run: bool
+    status: str
+    request: dict[str, Any]
+    response: dict[str, Any]
+    error_message: str | None
+    executed_at: str
+
+
 class StorageRepository:
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
@@ -45,8 +79,20 @@ class StorageRepository:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    @contextmanager
+    def _open(self):
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def get_collector_cursor(self, profile_id: str, collector_key: str) -> CollectorCursorRecord | None:
-        with self._connect() as connection:
+        with self._open() as connection:
             row = connection.execute(
                 """
                 SELECT id, profile_id, collector_key, updated_after, trashed_after,
@@ -72,7 +118,7 @@ class StorageRepository:
         )
 
     def upsert_collector_cursor(self, record: CollectorCursorRecord) -> None:
-        with self._connect() as connection:
+        with self._open() as connection:
             connection.execute(
                 """
                 INSERT INTO collector_cursor (
@@ -99,7 +145,7 @@ class StorageRepository:
             )
 
     def insert_feedback_event(self, record: FeedbackEventRecord) -> None:
-        with self._connect() as connection:
+        with self._open() as connection:
             connection.execute(
                 """
                 INSERT INTO feedback_event (
@@ -132,7 +178,7 @@ class StorageRepository:
         timezone: str = "UTC",
         locale: str = "ja-JP",
     ) -> None:
-        with self._connect() as connection:
+        with self._open() as connection:
             connection.execute(
                 """
                 INSERT INTO ranker_profile (id, immich_user_id, display_name, timezone, locale, enabled)
@@ -141,8 +187,122 @@ class StorageRepository:
                 (profile_id, immich_user_id, display_name, timezone, locale),
             )
 
+    def insert_action_policy(
+        self,
+        *,
+        policy_id: str,
+        profile_id: str,
+        policy_key: str,
+        display_name: str,
+        execution_mode: str,
+    ) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO action_policy (id, profile_id, policy_key, display_name, execution_mode, display_json, enabled)
+                VALUES (?, ?, ?, ?, ?, '{}', 1)
+                """,
+                (policy_id, profile_id, policy_key, display_name, execution_mode),
+            )
+
+    def insert_action_destination(
+        self,
+        *,
+        destination_id: str,
+        profile_id: str,
+        destination_key: str,
+        destination_type: str,
+        immich_resource_id: str,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO action_destination (
+                  id, profile_id, destination_key, destination_type, immich_resource_id, config_json, enabled
+                ) VALUES (?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    destination_id,
+                    profile_id,
+                    destination_key,
+                    destination_type,
+                    immich_resource_id,
+                    json.dumps(config or {}, ensure_ascii=True, sort_keys=True),
+                ),
+            )
+
+    def insert_inference_trace(self, record: InferenceTraceRecord) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO inference_trace (
+                  id, profile_id, immich_asset_id, trigger_type, execution_mode,
+                  candidate_categories_json, score_json, final_score,
+                  threshold_snapshot_json, protected, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.profile_id,
+                    record.immich_asset_id,
+                    record.trigger_type,
+                    record.execution_mode,
+                    json.dumps(record.candidate_categories, ensure_ascii=True, sort_keys=True),
+                    json.dumps(record.score, ensure_ascii=True, sort_keys=True),
+                    record.final_score,
+                    json.dumps(record.threshold_snapshot, ensure_ascii=True, sort_keys=True),
+                    int(record.protected),
+                    record.occurred_at,
+                ),
+            )
+
+    def list_inference_traces(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM inference_trace WHERE profile_id = ? ORDER BY occurred_at ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def insert_action_execution_log(self, record: ActionExecutionLogRecord) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO action_execution_log (
+                  id, profile_id, inference_trace_id, action_policy_id, destination_id,
+                  immich_asset_id, action_type, execution_mode, dry_run, status,
+                  request_json, response_json, error_message, executed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.profile_id,
+                    record.inference_trace_id,
+                    record.action_policy_id,
+                    record.destination_id,
+                    record.immich_asset_id,
+                    record.action_type,
+                    record.execution_mode,
+                    int(record.dry_run),
+                    record.status,
+                    json.dumps(record.request, ensure_ascii=True, sort_keys=True),
+                    json.dumps(record.response, ensure_ascii=True, sort_keys=True),
+                    record.error_message,
+                    record.executed_at,
+                ),
+            )
+
+    def list_action_execution_logs(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM action_execution_log WHERE profile_id = ? ORDER BY executed_at ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
     def list_feedback_events(self, profile_id: str) -> list[sqlite3.Row]:
-        with self._connect() as connection:
+        with self._open() as connection:
             rows = connection.execute(
                 "SELECT * FROM feedback_event WHERE profile_id = ? ORDER BY occurred_at ASC",
                 (profile_id,),
