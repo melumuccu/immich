@@ -8,7 +8,7 @@ STATE_DIR_ENV = "SMART_RANKER_STATE_DIR"
 
 
 def project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[2]
 
 
 def resolve_state_root(explicit_state_dir: Path | str | None = None) -> Path:

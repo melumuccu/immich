@@ -18,10 +18,14 @@ dependencies = [
 ]
 
 [tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
+packages = [
+	"smart_ranker",
+	"smart_ranker.immich_client",
+	"smart_ranker.storage",
+	"smart_ranker.web",
+]
+package-dir = {"smart_ranker" = "src"}
 
 [tool.setuptools.package-data]
 "smart_ranker.storage" = ["sql/*.sql"]
+"smart_ranker.web" = ["static/*.css", "static/*.html", "static/*.js"]

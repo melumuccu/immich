@@ -16,7 +16,7 @@
 ## 前提
 
 - Python 3.10 以上
-- 作業ディレクトリは `src/smart-ranker`
+- 作業ディレクトリは `smart-ranker`
 - 依存は `.venv` へ入れる前提
 
 ## セットアップ
@@ -24,7 +24,7 @@
 1. 作業ディレクトリへ移動する。
 
 ```bash
-cd /Users/fujisawakoki/projects/immich/src/smart-ranker
+cd /Users/fujisawakoki/projects/immich/smart-ranker
 ```
 
 1. 仮想環境を作る。
@@ -45,19 +45,19 @@ python3 -m venv .venv
 1. <span id="step-bootstrap-storage"></span>ストレージを初期化する。
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m smart_ranker bootstrap-storage --state-dir ./var/local
+.venv/bin/python -m smart_ranker bootstrap-storage --state-dir ./var/local
 ```
 
 期待値:
 
-- `state_dir=.../src/smart-ranker/var/local`
-- `db_path=.../src/smart-ranker/var/local/db/smart-ranker.sqlite3`
+- `state_dir=.../smart-ranker/var/local`
+- `db_path=.../smart-ranker/var/local/db/smart-ranker.sqlite3`
 - `applied_migrations=0001_initial_storage.sql`
 
 1. Web アプリを起動する。
 
 ```bash
-env SMART_RANKER_STATE_DIR=$PWD/var/local PYTHONPATH=src \
+env SMART_RANKER_STATE_DIR=$PWD/var/local \
   .venv/bin/python -m uvicorn smart_ranker.web.app:create_app \
   --factory --host 127.0.0.1 --port 8010
 ```
@@ -112,7 +112,7 @@ curl -s http://127.0.0.1:8010/api/jobs/<jobRunId>
 1. 単体テスト一式を実行する。
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -p 'test_*.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 期待値:
@@ -122,13 +122,13 @@ env PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 1. Web まわりだけ確認したい場合は Web test に絞る。
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m unittest tests.test_web_app
+.venv/bin/python -m unittest tests.test_web_app
 ```
 
 1. ストレージだけ確認したい場合は [ストレージの初期化](#step-bootstrap-storage)に加えて storage test を回す。
 
 ```bash
-env PYTHONPATH=src .venv/bin/python -m unittest tests.test_storage_bootstrap
+.venv/bin/python -m unittest tests.test_storage_bootstrap
 ```
 
 ## 生成されるもの
@@ -138,7 +138,7 @@ env PYTHONPATH=src .venv/bin/python -m unittest tests.test_storage_bootstrap
 - `var/local/snapshots/`
 - `var/local/logs/`
 
-`SMART_RANKER_STATE_DIR` を指定しない場合は、既定で `src/smart-ranker/var` を使う。
+`SMART_RANKER_STATE_DIR` を指定しない場合は、既定で `smart-ranker/var` を使う。
 
 ## 現時点の確認観点
 
