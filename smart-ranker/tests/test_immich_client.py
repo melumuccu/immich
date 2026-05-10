@@ -40,6 +40,41 @@ class FakeRequestsSession:
 
 
 class ImmichClientTest(unittest.TestCase):
+    def test_search_metadata_supports_nested_assets_payload(self) -> None:
+        fake_session = FakeRequestsSession(
+            [
+                FakeResponse(
+                    200,
+                    {
+                        "albums": {"items": []},
+                        "assets": {
+                            "items": [
+                                {
+                                    "id": "asset-1",
+                                    "isFavorite": True,
+                                    "isTrashed": False,
+                                    "visibility": "timeline",
+                                    "people": [{"id": "person-1"}],
+                                    "originalFileName": "IMG_0001.JPG",
+                                    "originalPath": "/library/IMG_0001.JPG",
+                                    "updatedAt": "2026-05-09T00:00:00Z",
+                                }
+                            ],
+                            "nextPage": "2",
+                            "count": 1,
+                        },
+                    },
+                )
+            ]
+        )
+        session = ImmichSession(base_url="http://immich.local", api_key="secret", session=fake_session)
+
+        search_result = AssetReadClient(session).search_metadata({"page": 1})
+
+        self.assertEqual(["asset-1"], [item.id for item in search_result.items])
+        self.assertEqual("2", search_result.next_page)
+        self.assertTrue(search_result.has_next_page)
+
     def test_asset_and_people_clients_use_expected_routes(self) -> None:
         fake_session = FakeRequestsSession(
             [

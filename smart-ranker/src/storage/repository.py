@@ -18,6 +18,10 @@ class CollectorCursorRecord:
     last_succeeded_at: str | None
     last_attempted_at: str | None
     last_run_id: str | None
+    pending_page: str | None = None
+    pending_page_size: int | None = None
+    pending_updated_before: str | None = None
+    pending_trashed_before: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,7 +112,8 @@ class StorageRepository:
             row = connection.execute(
                 """
                 SELECT id, profile_id, collector_key, updated_after, trashed_after,
-                       last_succeeded_at, last_attempted_at, last_run_id
+                       last_succeeded_at, last_attempted_at, last_run_id,
+                       pending_page, pending_page_size, pending_updated_before, pending_trashed_before
                 FROM collector_cursor
                 WHERE profile_id = ? AND collector_key = ?
                 """,
@@ -127,6 +132,10 @@ class StorageRepository:
             last_succeeded_at=row["last_succeeded_at"],
             last_attempted_at=row["last_attempted_at"],
             last_run_id=row["last_run_id"],
+            pending_page=row["pending_page"],
+            pending_page_size=row["pending_page_size"],
+            pending_updated_before=row["pending_updated_before"],
+            pending_trashed_before=row["pending_trashed_before"],
         )
 
     def upsert_collector_cursor(self, record: CollectorCursorRecord) -> None:
@@ -135,14 +144,19 @@ class StorageRepository:
                 """
                 INSERT INTO collector_cursor (
                   id, profile_id, collector_key, updated_after, trashed_after,
-                  last_succeeded_at, last_attempted_at, last_run_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                    last_succeeded_at, last_attempted_at, last_run_id,
+                                    pending_page, pending_page_size, pending_updated_before, pending_trashed_before
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(profile_id, collector_key) DO UPDATE SET
                   updated_after = excluded.updated_after,
                   trashed_after = excluded.trashed_after,
                   last_succeeded_at = excluded.last_succeeded_at,
                   last_attempted_at = excluded.last_attempted_at,
-                  last_run_id = excluded.last_run_id
+                                    last_run_id = excluded.last_run_id,
+                                    pending_page = excluded.pending_page,
+                                    pending_page_size = excluded.pending_page_size,
+                                    pending_updated_before = excluded.pending_updated_before,
+                                    pending_trashed_before = excluded.pending_trashed_before
                 """,
                 (
                     record.id,
@@ -153,6 +167,10 @@ class StorageRepository:
                     record.last_succeeded_at,
                     record.last_attempted_at,
                     record.last_run_id,
+                    record.pending_page,
+                    record.pending_page_size,
+                    record.pending_updated_before,
+                    record.pending_trashed_before,
                 ),
             )
 

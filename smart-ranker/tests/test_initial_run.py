@@ -205,6 +205,8 @@ class InitialRunTest(unittest.TestCase):
                     "page": 1,
                     "updatedAfter": "2026-05-09T12:00:00Z",
                     "trashedAfter": "2026-05-09T12:00:00Z",
+                    "updatedBefore": "2026-05-09T12:10:00Z",
+                    "trashedBefore": "2026-05-09T12:10:00Z",
                 },
                 asset_client.calls[1],
             )

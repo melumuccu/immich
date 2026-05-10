@@ -348,7 +348,7 @@ const formatJobResultSummary = (jobRun) => {
   }
 
   if (jobRun.jobType === "collect") {
-    return `assets ${formatCount(result.assetCount)} / feature inputs ${formatCount(result.featureInputCount)}`;
+    return `assets ${formatCount(result.assetCount)} / feature inputs ${formatCount(result.featureInputCount)}${result.hasMore ? " / more pending" : ""}`;
   }
 
   if (jobRun.jobType === "train") {
@@ -391,13 +391,17 @@ const buildStageCards = () => {
       jobRun: collectRun,
       fallbackActive: false,
       note: collectRun
-        ? "差分収集と feature input 作成が完了した結果です。"
+        ? collectRun.result?.hasMore
+          ? "差分収集を継続中です。hasMore が false になるまで collect を繰り返してください。"
+          : "差分収集と feature input 作成が完了した結果です。"
         : "次の collect 実行で asset 数と feature input 数がここに出ます。",
       facts: collectRun
         ? [
           { label: "assets", value: formatCount(collectRun.result?.assetCount) },
           { label: "feature inputs", value: formatCount(collectRun.result?.featureInputCount) },
           { label: "feedback", value: formatCount(collectRun.result?.feedbackCount) },
+          { label: "batch size", value: formatCount(collectRun.result?.batchSize) },
+          { label: "has more", value: collectRun.result?.hasMore ? "yes" : "no" },
         ]
         : [
           { label: "status", value: "idle" },

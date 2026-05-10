@@ -32,6 +32,7 @@ REVIEW_THRESHOLD_ENV = "SMART_RANKER_REVIEW_THRESHOLD"
 
 JOB_TYPES = ("collect", "train", "score", "apply")
 DEFAULT_REVIEW_THRESHOLD = 0.5
+DEFAULT_COLLECT_BATCH_SIZE = 100
 DEFAULT_POLICY_KEY = "review-policy"
 DEFAULT_POLICY_DISPLAY_NAME = "Review Policy"
 DEFAULT_REVIEW_DESTINATION_KEY = "review-album"
@@ -109,6 +110,7 @@ class SmartRankerJobRunner:
         inference_job: InferenceJob,
         profile_id: str,
         immich_user_id: str,
+        collect_batch_size: int,
         review_album_resource_id: str | None,
         review_threshold: float,
         update_description: bool,
@@ -123,6 +125,7 @@ class SmartRankerJobRunner:
         self.inference_job = inference_job
         self.profile_id = profile_id
         self.immich_user_id = immich_user_id
+        self.collect_batch_size = collect_batch_size
         self.review_album_resource_id = review_album_resource_id
         self.review_threshold = review_threshold
         self.update_description = update_description
@@ -139,7 +142,10 @@ class SmartRankerJobRunner:
 
     def collect(self, payload: dict[str, Any]) -> dict[str, Any]:
         rescued_assets = self._parse_rescued_assets(payload.get("rescuedAssets", ()))
-        collect_result = self.collector.collect(rescued_assets=rescued_assets)
+        collect_result = self.collector.collect(
+            rescued_assets=rescued_assets,
+            max_assets=self._resolve_collect_batch_size(payload),
+        )
         build_result = self.feature_input_builder.build(collect_result.assets)
         resolutions = [self.label_resolver.resolve(asset_input) for asset_input in build_result.inputs]
 
@@ -154,6 +160,10 @@ class SmartRankerJobRunner:
             "missingEmbeddingAssetIds": list(build_result.missing_embedding_asset_ids),
             "feedbackCount": collect_result.feedback_count,
             "cursorUpdatedAfter": collect_result.cursor_after.updated_after,
+            "batchSize": collect_result.batch_size,
+            "hasMore": collect_result.has_more,
+            "nextPage": collect_result.next_page,
+            "pendingWindowUpdatedBefore": collect_result.cursor_after.pending_updated_before,
         }
 
     def train(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -203,6 +213,13 @@ class SmartRankerJobRunner:
         if force_collect or not self.cache.feature_inputs:
             self.collect({})
         return self.cache.feature_inputs, self.cache.label_resolutions
+
+    def _resolve_collect_batch_size(self, payload: dict[str, Any]) -> int:
+        raw_value = payload.get("batchSize", self.collect_batch_size)
+        try:
+            return max(1, int(raw_value))
+        except (TypeError, ValueError):
+            return self.collect_batch_size
 
     def _resolve_model_run_id(self, payload: dict[str, Any]) -> str:
         explicit_model_run_id = payload.get("modelRunId")
@@ -427,6 +444,7 @@ def build_job_service(
         )
         review_album_resource_id = runtime_settings.review_album_resource_id
         review_threshold = runtime_settings.review_threshold
+        collect_batch_size = _load_collect_batch_size(repository, profile_id)
         label_resolver_config = runtime_settings.label_resolver_config
         label_resolver = LabelResolver(label_resolver_config)
         feature_assembler = FeatureAssembler(label_resolver_config.known_category_keys)
@@ -455,6 +473,7 @@ def build_job_service(
             inference_job=inference_job,
             profile_id=profile_id,
             immich_user_id=immich_user_id,
+            collect_batch_size=collect_batch_size,
             review_album_resource_id=review_album_resource_id,
             review_threshold=review_threshold,
             update_description=runtime_settings.update_description,
@@ -476,3 +495,10 @@ def _build_configuration_error_service(
         handlers={job_type: handler for job_type in JOB_TYPES},
         now_factory=now_factory,
     )
+
+
+def _load_collect_batch_size(repository: StorageRepository, profile_id: str) -> int:
+    for row in repository.list_execution_schedules(profile_id):
+        if row["job_type"] == "collect":
+            return max(1, int(row["batch_size"]))
+    return DEFAULT_COLLECT_BATCH_SIZE

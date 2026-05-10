@@ -41,7 +41,7 @@ class StorageBootstrapTest(unittest.TestCase):
             self.assertTrue(first_result.paths.logs_dir.is_dir())
             self.assertTrue(first_result.paths.db_path.is_file())
             self.assertEqual(
-                ["0001_initial_storage.sql"],
+                ["0001_initial_storage.sql", "0002_collect_batch_cursor.sql"],
                 first_result.migration_result.applied_migrations,
             )
 
@@ -56,7 +56,7 @@ class StorageBootstrapTest(unittest.TestCase):
             second_result = bootstrap_storage(state_dir=state_dir)
             self.assertEqual([], second_result.migration_result.applied_migrations)
             self.assertEqual(
-                ["0001_initial_storage.sql"],
+                ["0001_initial_storage.sql", "0002_collect_batch_cursor.sql"],
                 second_result.migration_result.skipped_migrations,
             )
 

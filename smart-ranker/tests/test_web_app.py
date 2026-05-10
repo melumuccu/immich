@@ -225,6 +225,77 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(2, len(ledger["inferenceTraces"]))
             self.assertEqual(4, len(ledger["actionExecutionLogs"]))
 
+    def test_manual_collect_uses_schedule_batch_size_and_reports_pending_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bootstrap_result = bootstrap_storage(state_dir=Path(temp_dir) / "state")
+            repository = StorageRepository(bootstrap_result.paths.db_path)
+            repository.insert_profile(profile_id="profile-1", immich_user_id="immich-user-1")
+            repository.upsert_execution_schedule(
+                schedule_id="schedule-collect",
+                profile_id="profile-1",
+                job_type="collect",
+                run_mode="manual",
+                cron_expr=None,
+                dry_run=False,
+                batch_size=1,
+                enabled=True,
+            )
+            asset_client = FakeAssetClient(
+                [
+                    SearchResult(
+                        items=[make_asset(asset_id="person-positive", favorite=True, people=("person-1",))],
+                        next_page="2",
+                        has_next_page=True,
+                        raw={},
+                    ),
+                    SearchResult(
+                        items=[make_asset(asset_id="person-negative", trashed=True, people=("person-1",))],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                ]
+            )
+            job_service = build_job_service(
+                storage_paths=bootstrap_result.paths,
+                repository=repository,
+                profile_id="profile-1",
+                immich_user_id="immich-user-1",
+                asset_client=asset_client,
+                embedding_reader=FakeEmbeddingReader(
+                    {
+                        "person-positive": [2.0, 1.5],
+                        "person-negative": [-2.0, -1.5],
+                    }
+                ),
+                action_client=FakeActionClient(),
+                review_album_resource_id="album-1",
+                review_threshold=1.1,
+                now_factory=lambda: "2026-05-09T12:00:00Z",
+            )
+            app = create_app(
+                state_dir=Path(temp_dir) / "state",
+                profile_id="profile-1",
+                job_service=job_service,
+            )
+            client = TestClient(app)
+
+            first_response = client.post("/api/jobs/collect", json={"trigger": "test"})
+            first_status = client.get(f"/api/jobs/{first_response.json()['jobRunId']}").json()
+
+            self.assertEqual(1, first_status["result"]["assetCount"])
+            self.assertEqual(1, first_status["result"]["featureInputCount"])
+            self.assertEqual(1, first_status["result"]["batchSize"])
+            self.assertTrue(first_status["result"]["hasMore"])
+
+            second_response = client.post("/api/jobs/collect", json={"trigger": "test"})
+            second_status = client.get(f"/api/jobs/{second_response.json()['jobRunId']}").json()
+
+            self.assertEqual(1, second_status["result"]["assetCount"])
+            self.assertEqual(1, second_status["result"]["featureInputCount"])
+            self.assertEqual(1, second_status["result"]["batchSize"])
+            self.assertFalse(second_status["result"]["hasMore"])
+
     def test_manual_job_api_reports_configuration_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch.dict(

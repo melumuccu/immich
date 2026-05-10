@@ -36,9 +36,10 @@ def normalize_search_result(
     payload: dict[str, Any],
     item_normalizer: Callable[[dict[str, Any]], Any],
 ) -> SearchResult:
-    items = [item_normalizer(item) for item in payload.get("items", [])]
-    next_page = payload.get("nextPage")
-    has_next_page = bool(payload.get("hasNextPage", next_page is not None))
+    container = payload.get("assets") if isinstance(payload.get("assets"), dict) else payload
+    items = [item_normalizer(item) for item in container.get("items", [])]
+    next_page = container.get("nextPage")
+    has_next_page = bool(container.get("hasNextPage", next_page is not None))
     return SearchResult(items=items, next_page=next_page, has_next_page=has_next_page, raw=payload)
 
 
