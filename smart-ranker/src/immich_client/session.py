@@ -22,6 +22,15 @@ class ResponseEnvelope:
     payload: Any
 
 
+@dataclass(frozen=True)
+class BinaryResponseEnvelope:
+    status_code: int
+    payload: bytes
+    content_type: str | None = None
+    cache_control: str | None = None
+    etag: str | None = None
+
+
 def _normalize_query_value(value: Any) -> Any:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -61,6 +70,9 @@ class ImmichSession:
 
     def get(self, path: str, *, params: dict[str, Any] | None = None) -> ResponseEnvelope:
         return self.request("GET", path, params=params, retry=True)
+
+    def get_bytes(self, path: str, *, params: dict[str, Any] | None = None) -> BinaryResponseEnvelope:
+        return self.request_bytes("GET", path, params=params, retry=True)
 
     def post(self, path: str, *, json_body: Any | None = None) -> ResponseEnvelope:
         return self.request("POST", path, json_body=json_body)
@@ -116,3 +128,50 @@ class ImmichSession:
             payload = response.json()
 
         return ResponseEnvelope(status_code=response.status_code, payload=payload)
+
+    def request_bytes(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any | None = None,
+        retry: bool = False,
+    ) -> BinaryResponseEnvelope:
+        url = f"{self.base_url}/{self.api_prefix}/{path.lstrip('/')}"
+        headers = {
+            "Accept": "*/*",
+            "x-api-key": self.api_key,
+        }
+        normalized_params = _normalize_query_params(params)
+
+        attempts = self.read_retries + 1 if retry else 1
+        response: requests.Response | None = None
+
+        for attempt in range(attempts):
+            response = self.session.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=normalized_params,
+                json=json_body,
+                timeout=self.timeout,
+            )
+
+            if response.status_code < 500 or attempt == attempts - 1:
+                break
+
+            time.sleep(0.25 * (attempt + 1))
+
+        assert response is not None
+
+        if response.status_code >= 400:
+            raise ImmichHttpError(method=method, url=url, status_code=response.status_code, response_text=response.text)
+
+        return BinaryResponseEnvelope(
+            status_code=response.status_code,
+            payload=response.content or b"",
+            content_type=response.headers.get("Content-Type") if response.headers is not None else None,
+            cache_control=response.headers.get("Cache-Control") if response.headers is not None else None,
+            etag=response.headers.get("ETag") if response.headers is not None else None,
+        )

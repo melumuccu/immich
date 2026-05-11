@@ -73,10 +73,75 @@ class ActionExecutionLogRecord:
     executed_at: str
 
 
+@dataclass(frozen=True)
+class FavoriteSignalRecord:
+    id: str
+    profile_id: str
+    immich_asset_id: str
+    first_seen_at: str
+    last_seen_at: str
+    cleared_at: str | None
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TrashSignalRecord:
+    id: str
+    profile_id: str
+    immich_asset_id: str
+    first_seen_at: str
+    last_seen_at: str
+    restored_at: str | None
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ApplyExclusionAssetRecord:
+    id: str
+    profile_id: str
+    immich_asset_id: str
+    score_run_id: str | None
+    action_log_id: str | None
+    reason: str
+    excluded_at: str
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class ScoreRunRecord:
+    id: str
+    profile_id: str
+    model_run_id: str | None
+    trigger_type: str
+    status: str
+    scope: dict[str, Any]
+    started_at: str
+    completed_at: str | None
+
+
+@dataclass(frozen=True)
+class ScoreResultRecord:
+    id: str
+    score_run_id: str
+    profile_id: str
+    immich_asset_id: str
+    total_score: float
+    rank_index: int
+    category_scores: dict[str, Any]
+    current_state: dict[str, Any]
+    scored_at: str
+
+
 RUNTIME_DATA_TABLES = (
     "action_execution_log",
     "feedback_event",
     "inference_trace",
+    "score_result",
+    "score_run",
+    "apply_exclusion_asset",
+    "favorite_signal",
+    "trash_signal",
+    "job_run",
     "collector_cursor",
 )
 
@@ -757,6 +822,277 @@ class StorageRepository:
             rows = connection.execute(
                 "SELECT * FROM execution_schedule WHERE profile_id = ? ORDER BY job_type ASC",
                 (profile_id,),
+            ).fetchall()
+        return rows
+
+    def upsert_favorite_signal(self, record: FavoriteSignalRecord) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO favorite_signal (
+                  id, profile_id, immich_asset_id, first_seen_at, last_seen_at, cleared_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, immich_asset_id) DO UPDATE SET
+                  last_seen_at = excluded.last_seen_at,
+                  cleared_at = excluded.cleared_at,
+                  metadata_json = excluded.metadata_json
+                """,
+                (
+                    record.id,
+                    record.profile_id,
+                    record.immich_asset_id,
+                    record.first_seen_at,
+                    record.last_seen_at,
+                    record.cleared_at,
+                    self._dump_json(record.metadata),
+                ),
+            )
+
+    def upsert_trash_signal(self, record: TrashSignalRecord) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO trash_signal (
+                  id, profile_id, immich_asset_id, first_seen_at, last_seen_at, restored_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(profile_id, immich_asset_id) DO UPDATE SET
+                  last_seen_at = excluded.last_seen_at,
+                  restored_at = excluded.restored_at,
+                  metadata_json = excluded.metadata_json
+                """,
+                (
+                    record.id,
+                    record.profile_id,
+                    record.immich_asset_id,
+                    record.first_seen_at,
+                    record.last_seen_at,
+                    record.restored_at,
+                    self._dump_json(record.metadata),
+                ),
+            )
+
+    def mark_missing_favorite_signals_cleared(
+        self,
+        profile_id: str,
+        active_asset_ids: Sequence[str],
+        *,
+        cleared_at: str,
+    ) -> int:
+        query = """
+            UPDATE favorite_signal
+            SET cleared_at = ?
+            WHERE profile_id = ? AND cleared_at IS NULL
+        """
+        parameters: list[Any] = [cleared_at, profile_id]
+        if active_asset_ids:
+            placeholders = ", ".join("?" for _ in active_asset_ids)
+            query += f" AND immich_asset_id NOT IN ({placeholders})"
+            parameters.extend(active_asset_ids)
+
+        with self._open() as connection:
+            cursor = connection.execute(query, parameters)
+        return max(cursor.rowcount, 0)
+
+    def mark_missing_trash_signals_restored(
+        self,
+        profile_id: str,
+        active_asset_ids: Sequence[str],
+        *,
+        restored_at: str,
+    ) -> int:
+        query = """
+            UPDATE trash_signal
+            SET restored_at = ?
+            WHERE profile_id = ? AND restored_at IS NULL
+        """
+        parameters: list[Any] = [restored_at, profile_id]
+        if active_asset_ids:
+            placeholders = ", ".join("?" for _ in active_asset_ids)
+            query += f" AND immich_asset_id NOT IN ({placeholders})"
+            parameters.extend(active_asset_ids)
+
+        with self._open() as connection:
+            cursor = connection.execute(query, parameters)
+        return max(cursor.rowcount, 0)
+
+    def list_favorite_signals(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM favorite_signal WHERE profile_id = ? ORDER BY last_seen_at DESC, immich_asset_id ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def list_trash_signals(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM trash_signal WHERE profile_id = ? ORDER BY last_seen_at DESC, immich_asset_id ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def insert_apply_exclusion_asset(self, record: ApplyExclusionAssetRecord) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO apply_exclusion_asset (
+                  id, profile_id, immich_asset_id, score_run_id, action_log_id, reason, excluded_at, active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.profile_id,
+                    record.immich_asset_id,
+                    record.score_run_id,
+                    record.action_log_id,
+                    record.reason,
+                    record.excluded_at,
+                    int(record.active),
+                ),
+            )
+
+    def list_apply_exclusion_assets(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM apply_exclusion_asset WHERE profile_id = ? ORDER BY excluded_at ASC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def list_active_apply_exclusion_asset_ids(self, profile_id: str) -> set[str]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT immich_asset_id FROM apply_exclusion_asset WHERE profile_id = ? AND active = 1",
+                (profile_id,),
+            ).fetchall()
+        return {str(row["immich_asset_id"]) for row in rows if row["immich_asset_id"]}
+
+    def insert_score_run(self, record: ScoreRunRecord) -> None:
+        with self._open() as connection:
+            connection.execute(
+                """
+                INSERT INTO score_run (
+                  id, profile_id, model_run_id, trigger_type, status, scope_json, started_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.profile_id,
+                    record.model_run_id,
+                    record.trigger_type,
+                    record.status,
+                    self._dump_json(record.scope),
+                    record.started_at,
+                    record.completed_at,
+                ),
+            )
+
+    def update_score_run(self, *, score_run_id: str, status: str, completed_at: str | None) -> None:
+        with self._open() as connection:
+            connection.execute(
+                "UPDATE score_run SET status = ?, completed_at = ? WHERE id = ?",
+                (status, completed_at, score_run_id),
+            )
+
+    def list_score_runs(self, profile_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                "SELECT * FROM score_run WHERE profile_id = ? ORDER BY started_at DESC, id DESC",
+                (profile_id,),
+            ).fetchall()
+        return rows
+
+    def get_score_run(self, profile_id: str, score_run_id: str) -> sqlite3.Row | None:
+        with self._open() as connection:
+            row = connection.execute(
+                "SELECT * FROM score_run WHERE profile_id = ? AND id = ?",
+                (profile_id, score_run_id),
+            ).fetchone()
+        return row
+
+    def get_latest_completed_score_run(self, profile_id: str) -> sqlite3.Row | None:
+        with self._open() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM score_run
+                WHERE profile_id = ? AND status = 'completed'
+                ORDER BY completed_at DESC, started_at DESC, id DESC
+                LIMIT 1
+                """,
+                (profile_id,),
+            ).fetchone()
+        return row
+
+    def insert_score_results(self, records: Sequence[ScoreResultRecord]) -> None:
+        if not records:
+            return
+
+        with self._open() as connection:
+            connection.executemany(
+                """
+                INSERT INTO score_result (
+                  id, score_run_id, profile_id, immich_asset_id, total_score, rank_index,
+                  category_scores_json, current_state_json, scored_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        record.id,
+                        record.score_run_id,
+                        record.profile_id,
+                        record.immich_asset_id,
+                        record.total_score,
+                        record.rank_index,
+                        self._dump_json(record.category_scores),
+                        self._dump_json(record.current_state),
+                        record.scored_at,
+                    )
+                    for record in records
+                ],
+            )
+
+    def list_score_results(self, profile_id: str, *, score_run_id: str) -> list[sqlite3.Row]:
+        with self._open() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM score_result
+                WHERE profile_id = ? AND score_run_id = ?
+                ORDER BY rank_index ASC, total_score ASC, immich_asset_id ASC
+                """,
+                (profile_id, score_run_id),
+            ).fetchall()
+        return rows
+
+    def count_score_results(self, profile_id: str, *, score_run_id: str) -> int:
+        with self._open() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM score_result WHERE profile_id = ? AND score_run_id = ?",
+                (profile_id, score_run_id),
+            ).fetchone()
+        return int(row["count"]) if row is not None else 0
+
+    def list_score_results_page(
+        self,
+        profile_id: str,
+        *,
+        score_run_id: str,
+        limit: int,
+        offset: int = 0,
+    ) -> list[sqlite3.Row]:
+        normalized_limit = max(1, int(limit))
+        normalized_offset = max(0, int(offset))
+        with self._open() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM score_result
+                WHERE profile_id = ? AND score_run_id = ?
+                ORDER BY rank_index ASC, total_score ASC, immich_asset_id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (profile_id, score_run_id, normalized_limit, normalized_offset),
             ).fetchall()
         return rows
 

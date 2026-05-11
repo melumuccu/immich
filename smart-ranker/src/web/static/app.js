@@ -8,10 +8,17 @@ const LIVE_RELOAD_DEFAULT_INTERVAL_MS = 1000;
 const JOB_HISTORY_STORAGE_KEY = "smart-ranker-job-history";
 const RUNTIME_RESET_TOKEN_STORAGE_KEY = "smart-ranker-runtime-reset-token";
 const MAX_JOB_HISTORY = 12;
+const SCORE_REVIEW_PAGE_SIZE = 100;
 
 const normalizeRoute = (path) => {
   const normalized = String(path ?? "/").replace(/\/+$/, "") || "/";
-  return normalized === "/settings" ? "settings" : "home";
+  if (normalized === "/settings") {
+    return "settings";
+  }
+  if (normalized === "/score-review") {
+    return "score-review";
+  }
+  return "home";
 };
 
 const normalizeStoredJobRun = (jobRun) => {
@@ -108,6 +115,11 @@ const state = {
       feedbackEvents: [],
       inferenceTraces: [],
       actionExecutionLogs: [],
+      favoriteSignals: [],
+      trashSignals: [],
+      scoreRuns: [],
+      scoreResults: [],
+      applyExclusionAssets: [],
     },
   },
   ui: {
@@ -118,6 +130,15 @@ const state = {
     personSearchQuery: "",
     personSearchResults: [],
     personReplaceTarget: null,
+    scoreReview: {
+      items: [],
+      page: 1,
+      pageSize: SCORE_REVIEW_PAGE_SIZE,
+      totalItems: 0,
+      totalPages: 0,
+      scoreRunId: null,
+      scoreRun: null,
+    },
   },
 };
 
@@ -305,6 +326,11 @@ const getRecentJobRun = (jobType) => state.ui.jobHistory.find((jobRun) => jobRun
 
 const getLatestModelSnapshot = () => getLatestItem(state.settings.models, "trainedAt");
 
+const getLatestScoreRun = () => getLatestItem(state.settings.ledger.scoreRuns, "completed_at")
+  ?? getLatestItem(state.settings.ledger.scoreRuns, "started_at");
+
+const getLatestScoreResult = () => state.settings.ledger.scoreResults?.[0] ?? null;
+
 const getLatestTrace = () => getLatestItem(state.settings.ledger.inferenceTraces, "occurred_at");
 
 const getLatestActionLog = () => getLatestItem(state.settings.ledger.actionExecutionLogs, "executed_at");
@@ -337,6 +363,45 @@ const formatScore = (value) => {
   return Number.isFinite(numeric) ? numeric.toFixed(2) : "n/a";
 };
 
+const buildScoreReviewRequestUrl = (page = state.ui.scoreReview.page) => {
+  const params = new URLSearchParams({
+    page: String(Math.max(1, Number(page) || 1)),
+    pageSize: String(state.ui.scoreReview.pageSize || SCORE_REVIEW_PAGE_SIZE),
+  });
+  if (state.ui.scoreReview.scoreRunId) {
+    params.set("scoreRunId", state.ui.scoreReview.scoreRunId);
+  }
+  return `/api/score-review?${params.toString()}`;
+};
+
+const applyScoreReviewPayload = (payload) => {
+  state.ui.scoreReview = {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    page: Math.max(1, Number(payload?.page) || 1),
+    pageSize: Math.max(1, Number(payload?.pageSize) || SCORE_REVIEW_PAGE_SIZE),
+    totalItems: Math.max(0, Number(payload?.totalItems) || 0),
+    totalPages: Math.max(0, Number(payload?.totalPages) || 0),
+    scoreRunId: payload?.scoreRunId ? String(payload.scoreRunId) : null,
+    scoreRun: payload?.scoreRun ?? null,
+  };
+};
+
+const formatScoreReviewRange = () => {
+  const { items, page, pageSize, totalItems } = state.ui.scoreReview;
+  if (!items.length || !totalItems) {
+    return "0 / 0";
+  }
+  const start = (page - 1) * pageSize + 1;
+  const end = start + items.length - 1;
+  return `${formatCount(start)}-${formatCount(end)} / ${formatCount(totalItems)}`;
+};
+
+const loadScoreReviewPage = async (page = state.ui.scoreReview.page) => {
+  const payload = await fetchJson(buildScoreReviewRequestUrl(page));
+  applyScoreReviewPayload(payload);
+  return payload;
+};
+
 const formatJobResultSummary = (jobRun) => {
   if (!jobRun) {
     return "not run yet";
@@ -347,16 +412,16 @@ const formatJobResultSummary = (jobRun) => {
     return String(result.error ?? result.errorType ?? "job failed");
   }
 
-  if (jobRun.jobType === "collect") {
-    return `assets ${formatCount(result.assetCount)} / feature inputs ${formatCount(result.featureInputCount)}${result.hasMore ? " / more pending" : ""}`;
+  if (jobRun.jobType === "learn") {
+    return `signals ${formatCount(result.favoriteSignalCount)} fav / ${formatCount(result.trashSignalCount)} trash / models ${formatCount(result.modelCount)}`;
   }
 
-  if (jobRun.jobType === "train") {
-    return `models ${formatCount(result.modelCount)} / ${String((result.modelKeys ?? []).join(", ") || "no keys")}`;
+  if (jobRun.jobType === "score") {
+    return `scored ${formatCount(result.scoredAssetCount)} / threshold ${formatScore(result.threshold)}`;
   }
 
-  if (jobRun.jobType === "score" || jobRun.jobType === "apply") {
-    return `traces ${formatCount(result.traceCount)}${result.dryRun ? " / dry run" : ""}`;
+  if (jobRun.jobType === "apply") {
+    return `applied ${formatCount(result.appliedCount)}${result.dryRun ? " / dry run" : ""}`;
   }
 
   return `${jobRun.jobType} completed`;
@@ -369,7 +434,7 @@ const renderJobOutput = (jobRun = state.ui.jobHistory[0] ?? null) => {
   }
 
   if (jobRun === null) {
-    output.textContent = "Run collect / train / score / apply to inspect the accepted payload and final result.";
+    output.textContent = "Run learn / score / apply to inspect the accepted payload and final result.";
     return;
   }
 
@@ -377,51 +442,30 @@ const renderJobOutput = (jobRun = state.ui.jobHistory[0] ?? null) => {
 };
 
 const buildStageCards = () => {
-  const collectRun = getRecentJobRun("collect");
-  const trainRun = getRecentJobRun("train");
+  const learnRun = getRecentJobRun("learn");
   const scoreRun = getRecentJobRun("score");
   const applyRun = getRecentJobRun("apply");
   const latestModel = getLatestModelSnapshot();
-  const latestTrace = getLatestTrace();
+  const latestScoreRun = getLatestScoreRun();
+  const latestScoreResult = getLatestScoreResult();
   const latestAction = getLatestActionLog();
 
   const stages = [
     {
-      title: "Collect",
-      jobRun: collectRun,
-      fallbackActive: false,
-      note: collectRun
-        ? collectRun.result?.hasMore
-          ? "差分収集を継続中です。hasMore が false になるまで collect を繰り返してください。"
-          : "差分収集と feature input 作成が完了した結果です。"
-        : "次の collect 実行で asset 数と feature input 数がここに出ます。",
-      facts: collectRun
-        ? [
-          { label: "assets", value: formatCount(collectRun.result?.assetCount) },
-          { label: "feature inputs", value: formatCount(collectRun.result?.featureInputCount) },
-          { label: "feedback", value: formatCount(collectRun.result?.feedbackCount) },
-          { label: "batch size", value: formatCount(collectRun.result?.batchSize) },
-          { label: "has more", value: collectRun.result?.hasMore ? "yes" : "no" },
-        ]
-        : [
-          { label: "status", value: "idle" },
-          { label: "waiting", value: "manual collect result" },
-        ],
-    },
-    {
-      title: "Train",
-      jobRun: trainRun,
+      title: "Learn",
+      jobRun: learnRun,
       fallbackActive: latestModel !== null,
-      note: trainRun
-        ? "学習で生成された model artifact と snapshot を表示します。"
+      note: learnRun
+        ? "favorite / trash signal の同期と model 学習の結果です。"
         : latestModel
-          ? "保存済み snapshot から直近の train 結果を読み出しています。"
-          : "train 実行後に snapshot 情報がここへ並びます。",
-      facts: trainRun
+          ? "保存済み snapshot から直近の learn 結果を読み出しています。"
+          : "learn 実行後に signal 数と snapshot がここへ出ます。",
+      facts: learnRun
         ? [
-          { label: "run id", value: String(trainRun.result?.runId ?? "n/a") },
-          { label: "models", value: formatCount(trainRun.result?.modelCount) },
-          { label: "snapshot", value: getFileName(trainRun.result?.snapshotPath) || "n/a" },
+          { label: "favorite", value: formatCount(learnRun.result?.favoriteSignalCount) },
+          { label: "trash", value: formatCount(learnRun.result?.trashSignalCount) },
+          { label: "models", value: formatCount(learnRun.result?.modelCount) },
+          { label: "snapshot", value: getFileName(learnRun.result?.snapshotPath) || "n/a" },
         ]
         : latestModel
           ? [
@@ -431,33 +475,33 @@ const buildStageCards = () => {
           ]
           : [
             { label: "status", value: "idle" },
-            { label: "waiting", value: "train snapshot" },
+            { label: "waiting", value: "learn snapshot" },
           ],
     },
     {
       title: "Score",
       jobRun: scoreRun,
-      fallbackActive: latestTrace !== null,
+      fallbackActive: latestScoreRun !== null,
       note: scoreRun
-        ? "推論結果の trace 数と dry run 状態です。"
-        : latestTrace
-          ? "保存済み inference trace から直近の score を可視化しています。"
-          : "score 実行後に trace がここへ反映されます。",
+        ? "全アセット採点と score review の結果です。"
+        : latestScoreRun
+          ? "保存済み score run から直近の review 結果を可視化しています。"
+          : "score 実行後に score review がここへ反映されます。",
       facts: scoreRun
         ? [
-          { label: "traces", value: formatCount(scoreRun.result?.traceCount) },
-          { label: "dry run", value: scoreRun.result?.dryRun ? "yes" : "no" },
-          { label: "model run", value: String(scoreRun.result?.modelRunId ?? "n/a") },
+          { label: "scored", value: formatCount(scoreRun.result?.scoredAssetCount) },
+          { label: "threshold", value: formatScore(scoreRun.result?.threshold) },
+          { label: "score run", value: String(scoreRun.result?.scoreRunId ?? "n/a") },
         ]
-        : latestTrace
+        : latestScoreRun
           ? [
-            { label: "traces", value: formatCount(state.settings.ledger.inferenceTraces.length) },
-            { label: "latest asset", value: String(latestTrace.immich_asset_id ?? "n/a") },
-            { label: "final score", value: formatScore(latestTrace.final_score) },
+            { label: "results", value: formatCount(state.settings.ledger.scoreResults.length) },
+            { label: "latest asset", value: String(latestScoreResult?.immich_asset_id ?? "n/a") },
+            { label: "score", value: formatScore(latestScoreResult?.total_score) },
           ]
           : [
             { label: "status", value: "idle" },
-            { label: "waiting", value: "inference trace" },
+            { label: "waiting", value: "score review" },
           ],
     },
     {
@@ -465,15 +509,15 @@ const buildStageCards = () => {
       jobRun: applyRun,
       fallbackActive: latestAction !== null,
       note: applyRun
-        ? "action 実行ログと apply 結果です。"
+        ? "threshold 以下の asset を trash へ送った結果です。"
         : latestAction
           ? "保存済み action log から直近の apply を可視化しています。"
           : "apply 実行後に action log がここへ反映されます。",
       facts: applyRun
         ? [
-          { label: "traces", value: formatCount(applyRun.result?.traceCount) },
+          { label: "applied", value: formatCount(applyRun.result?.appliedCount) },
           { label: "dry run", value: applyRun.result?.dryRun ? "yes" : "no" },
-          { label: "model run", value: String(applyRun.result?.modelRunId ?? "n/a") },
+          { label: "threshold", value: formatScore(applyRun.result?.threshold) },
         ]
         : latestAction
           ? [
@@ -547,7 +591,8 @@ const renderProcessVisualization = () => {
   }
 
   const latestModel = getLatestModelSnapshot();
-  const latestTrace = getLatestTrace();
+  const latestScoreRun = getLatestScoreRun();
+  const latestScoreResult = getLatestScoreResult();
   const latestAction = getLatestActionLog();
   const recentJob = state.ui.jobHistory[0] ?? null;
   const metricCards = [
@@ -562,12 +607,12 @@ const renderProcessVisualization = () => {
       note: latestModel ? `${String(latestModel.runId ?? "run")} / ${formatDateTime(latestModel.trainedAt)}` : "no snapshot yet",
     },
     {
-      label: "inference traces",
-      value: formatCount(state.settings.ledger.inferenceTraces.length),
-      note: latestTrace ? `${String(latestTrace.immich_asset_id ?? "asset")} / score ${formatScore(latestTrace.final_score)}` : "no trace yet",
+      label: "score review rows",
+      value: formatCount(state.settings.ledger.scoreResults.length),
+      note: latestScoreRun ? `${String(latestScoreRun.id ?? "score-run")} / top ${String(latestScoreResult?.immich_asset_id ?? "n/a")}` : "no score run yet",
     },
     {
-      label: "action logs",
+      label: "trash apply logs",
       value: formatCount(state.settings.ledger.actionExecutionLogs.length),
       note: latestAction ? `${String(latestAction.action_type ?? "action")} / ${String(latestAction.status ?? "unknown")}` : "no action yet",
     },
@@ -598,7 +643,7 @@ const renderProcessVisualization = () => {
       <div class="panel-header">
         <div>
           <h2>Pipeline Stages</h2>
-          <p class="panel-note">collect, train, score, apply を段ごとに見て、どこまで結果が出ているかを把握します。</p>
+          <p class="panel-note">learn, score, apply を段ごとに見て、どこまで結果が出ているかを把握します。</p>
         </div>
       </div>
       <div class="stage-grid">
@@ -652,9 +697,13 @@ const renderProcessVisualization = () => {
 
 const applyRouteState = () => {
   document.body.dataset.route = state.ui.currentRoute;
-  document.title = state.ui.currentRoute === "settings"
-    ? "Smart Ranker Console / Settings"
-    : "Smart Ranker Console";
+  if (state.ui.currentRoute === "settings") {
+    document.title = "Smart Ranker Console / Settings";
+  } else if (state.ui.currentRoute === "score-review") {
+    document.title = "Smart Ranker Console / Score Review";
+  } else {
+    document.title = "Smart Ranker Console";
+  }
 
   for (const link of document.querySelectorAll("[data-route-link]")) {
     const isCurrent = link.dataset.routeLink === state.ui.currentRoute;
@@ -719,7 +768,7 @@ const updatePersonGroup = (groupKey, updater) => {
 
 const getReviewPolicy = () => state.settings.policies.find((policy) => policy.policyKey === DEFAULT_POLICY_KEY) ?? {
   policyKey: DEFAULT_POLICY_KEY,
-  displayName: "Review Policy",
+  displayName: "Trash Threshold Policy",
   executionMode: "manual",
   display: {
     reviewThreshold: DEFAULT_REVIEW_THRESHOLD,
@@ -742,7 +791,7 @@ const upsertByKey = (items, keyField, nextItem) => {
   return nextItems;
 };
 
-const defaultSchedules = () => ["collect", "train", "score", "apply"].map((jobType) => ({
+const defaultSchedules = () => ["learn", "score", "apply"].map((jobType) => ({
   id: createTempId(`schedule-${jobType}`),
   jobType,
   runMode: "manual",
@@ -1073,20 +1122,6 @@ const renderCategoriesRoutingApp = () => {
 const renderPoliciesApp = () => {
   const container = document.getElementById("policies-app");
   const reviewPolicy = getReviewPolicy();
-  const reviewDestination = getDestination(DEFAULT_REVIEW_DESTINATION_KEY, {
-    destinationKey: DEFAULT_REVIEW_DESTINATION_KEY,
-    destinationType: "album",
-    immichResourceId: "",
-    config: {},
-    enabled: false,
-  });
-  const descriptionDestination = getDestination(DEFAULT_DESCRIPTION_DESTINATION_KEY, {
-    destinationKey: DEFAULT_DESCRIPTION_DESTINATION_KEY,
-    destinationType: "asset_description",
-    immichResourceId: DEFAULT_DESCRIPTION_RESOURCE_ID,
-    config: {},
-    enabled: true,
-  });
 
   container.innerHTML = `
     <section class="settings-section">
@@ -1102,59 +1137,15 @@ const renderPoliciesApp = () => {
           </select>
         </label>
         <label class="field">
-          <span>Review Threshold</span>
+          <span>Trash Threshold</span>
           <input id="policy-review-threshold" type="number" min="0" max="1" step="0.01" value="${escapeHtml(reviewPolicy.display?.reviewThreshold ?? DEFAULT_REVIEW_THRESHOLD)}">
         </label>
       </div>
       <div class="toggle-row">
         <label class="toggle">
           <input id="policy-enabled" type="checkbox" ${reviewPolicy.enabled ? "checked" : ""}>
-          review policy enabled
+          threshold policy enabled
         </label>
-        <label class="toggle">
-          <input id="policy-update-description" type="checkbox" ${reviewPolicy.display?.updateDescription !== false ? "checked" : ""}>
-          update asset description with score
-        </label>
-      </div>
-    </section>
-    <section class="settings-section">
-      <div class="card-grid">
-        <article class="setting-card compact">
-          <div class="card-header">
-            <strong>Review Album Destination</strong>
-            <span class="token">review-album</span>
-          </div>
-          <div class="field-grid single">
-            <label class="field">
-              <span>Album ID</span>
-              <input id="review-album-id" type="text" value="${escapeHtml(reviewDestination.immichResourceId)}" placeholder="Immich album id">
-            </label>
-          </div>
-          <div class="toggle-row">
-            <label class="toggle">
-              <input id="review-album-enabled" type="checkbox" ${reviewDestination.enabled ? "checked" : ""}>
-              enable review album action
-            </label>
-          </div>
-        </article>
-        <article class="setting-card compact">
-          <div class="card-header">
-            <strong>Description Destination</strong>
-            <span class="token">asset-description</span>
-          </div>
-          <div class="field-grid single">
-            <label class="field">
-              <span>Resource ID</span>
-              <input id="description-resource-id" type="text" value="${escapeHtml(descriptionDestination.immichResourceId || DEFAULT_DESCRIPTION_RESOURCE_ID)}">
-            </label>
-          </div>
-          <div class="toggle-row">
-            <label class="toggle">
-              <input id="description-destination-enabled" type="checkbox" ${descriptionDestination.enabled ? "checked" : ""}>
-              enable description destination
-            </label>
-          </div>
-        </article>
       </div>
     </section>
   `;
@@ -1212,9 +1203,121 @@ const renderDerivedLists = () => {
     const modelKeys = (item.models ?? []).map((model) => model.model_key ?? "unknown").join(", ");
     return `${item.runId ?? "no-run"} @ ${item.trainedAt ?? "n/a"}${modelKeys ? ` / ${modelKeys}` : ""}`;
   });
-  renderList("ledger-feedback", state.settings.ledger.feedbackEvents, (item) => `${item.feedback_type} / ${item.immich_asset_id}`);
-  renderList("ledger-traces", state.settings.ledger.inferenceTraces, (item) => `${item.immich_asset_id} / ${item.final_score}`);
+  renderList(
+    "ledger-feedback",
+    [
+      ...(state.settings.ledger.favoriteSignals ?? []).map((item) => ({ ...item, signalType: "favorite" })),
+      ...(state.settings.ledger.trashSignals ?? []).map((item) => ({ ...item, signalType: "trash" })),
+    ],
+    (item) => `${item.signalType} / ${item.immich_asset_id}`,
+  );
+  renderList(
+    "ledger-traces",
+    state.settings.ledger.scoreResults.slice(0, 8),
+    (item) => `#${item.rank_index} / ${item.immich_asset_id} / ${formatScore(item.total_score)}`,
+  );
   renderList("ledger-actions", state.settings.ledger.actionExecutionLogs, (item) => `${item.action_type} / ${item.status}`);
+};
+
+const renderScoreReviewPage = () => {
+  const container = document.getElementById("score-review-page");
+  if (!container) {
+    return;
+  }
+
+  const scoreReview = state.ui.scoreReview;
+  const items = scoreReview.items ?? [];
+  if (!scoreReview.scoreRunId) {
+    container.innerHTML = `
+      <article class="panel score-review-empty">
+        <p class="eyebrow">Score Review</p>
+        <h1>Scored assets will appear here after score completes.</h1>
+        <p class="lede">latest completed score run がない場合は一覧を作れません。先に score を実行してください。</p>
+      </article>
+    `;
+    return;
+  }
+
+  const scoreRun = scoreReview.scoreRun ?? {};
+  const cardsHtml = items.length
+    ? items.map((item) => {
+      const currentState = item.currentState ?? {};
+      const originalPath = currentState.originalPath || currentState.original_path || "";
+      const originalFileName = currentState.originalFileName || currentState.original_file_name || getFileName(originalPath) || item.immichAssetId;
+      const categoryEntries = Object.entries(item.categoryScores ?? {})
+        .sort((left, right) => Number(right[1]) - Number(left[1]))
+        .slice(0, 3);
+      const badges = [];
+      if (currentState.isFavorite || currentState.is_favorite) {
+        badges.push('<span class="meta-chip">favorite</span>');
+      }
+      if (currentState.isTrashed || currentState.is_trashed) {
+        badges.push('<span class="meta-chip">trash</span>');
+      }
+      if (currentState.type) {
+        badges.push(`<span class="meta-chip">${escapeHtml(currentState.type)}</span>`);
+      }
+      return `
+        <article class="panel score-review-card">
+          <img
+            class="score-review-thumb"
+            src="${escapeHtml(item.thumbnailUrl)}"
+            alt="${escapeHtml(originalFileName)} thumbnail"
+            loading="lazy"
+            referrerpolicy="same-origin"
+          >
+          <div class="score-review-card-body">
+            <div class="score-review-card-head">
+              <span class="token">#${formatCount(item.rankIndex)}</span>
+              <strong class="score-review-score">${escapeHtml(formatScore(item.totalScore))}</strong>
+            </div>
+            <div>
+              <h3>${escapeHtml(originalFileName)}</h3>
+              <p class="subtle">${escapeHtml(item.immichAssetId)}</p>
+            </div>
+            <p class="subtle score-review-path">${escapeHtml(originalPath || "path unavailable")}</p>
+            <div class="score-review-card-foot">
+              <div class="meta-row">
+                ${badges.join("")}
+                ${categoryEntries.map(([key, value]) => `<span class="meta-chip">${escapeHtml(key)} ${escapeHtml(formatScore(value))}</span>`).join("")}
+              </div>
+            </div>
+          </div>
+        </article>
+      `;
+    }).join("")
+    : `
+      <article class="panel score-review-empty">
+        <p class="subtle">この score run に score result はありません。</p>
+      </article>
+    `;
+
+  container.innerHTML = `
+    <article class="panel">
+      <p class="eyebrow">Score Review</p>
+      <div class="score-review-toolbar">
+        <div>
+          <h1>Scored assets ordered for review.</h1>
+          <p class="lede">score の結果を rank 順に 100 件ずつ確認します。thumbnail は Immich API を backend 経由で取得します。</p>
+        </div>
+        <div class="score-review-pager">
+          <button type="button" class="button-secondary" data-action="score-review-prev" ${scoreReview.page <= 1 ? "disabled" : ""}>prev 100</button>
+          <button type="button" class="button-secondary" data-action="score-review-next" ${scoreReview.totalPages === 0 || scoreReview.page >= scoreReview.totalPages ? "disabled" : ""}>next 100</button>
+        </div>
+      </div>
+      <div class="score-review-summary">
+        <div class="meta-row">
+          <span class="summary-chip">run ${escapeHtml(String(scoreRun.id ?? scoreReview.scoreRunId).slice(0, 8))}</span>
+          <span class="summary-chip">items ${escapeHtml(formatScoreReviewRange())}</span>
+          <span class="summary-chip">page ${escapeHtml(formatCount(scoreReview.page))} / ${escapeHtml(formatCount(scoreReview.totalPages))}</span>
+        </div>
+        <p class="subtle">completed ${escapeHtml(formatDateTime(scoreRun.completedAt))}</p>
+      </div>
+    </article>
+    <section class="score-review-grid">
+      ${cardsHtml}
+    </section>
+  `;
 };
 
 const renderAll = () => {
@@ -1222,6 +1325,7 @@ const renderAll = () => {
   ensurePersonGroupSelection();
   renderJobOutput();
   renderProcessVisualization();
+  renderScoreReviewPage();
   renderPersonGroupApp();
   renderCategoriesRoutingApp();
   renderPoliciesApp();
@@ -1230,12 +1334,13 @@ const renderAll = () => {
 };
 
 const refresh = async () => {
-  const [personGroupSettings, categoriesRoutingSettings, policySettings, jobsModels, ledger] = await Promise.all([
+  const [personGroupSettings, categoriesRoutingSettings, policySettings, jobsModels, ledger, scoreReviewPayload] = await Promise.all([
     fetchJson("/api/settings/person-groups"),
     fetchJson("/api/settings/categories-routing"),
     fetchJson("/api/settings/policies"),
     fetchJson("/api/settings/jobs-models"),
     fetchJson("/api/event-ledger"),
+    state.ui.currentRoute === "score-review" ? loadScoreReviewPage(state.ui.scoreReview.page) : Promise.resolve(null),
   ]);
 
   syncJobHistoryWithRuntimeResetToken(jobsModels.runtimeResetToken);
@@ -1251,7 +1356,52 @@ const refresh = async () => {
   state.settings.schedules = jobsModels.schedules ?? [];
   state.settings.models = jobsModels.models ?? [];
   state.settings.ledger = ledger;
+  if (scoreReviewPayload) {
+    setStatus(
+      "score-review-status",
+      state.ui.scoreReview.totalItems
+        ? `showing ${formatScoreReviewRange()}`
+        : "score result not available yet",
+    );
+  }
   renderAll();
+};
+
+const installScoreReviewHandlers = () => {
+  const container = document.getElementById("score-review-page");
+  if (!container) {
+    return;
+  }
+
+  container.addEventListener("click", async (event) => {
+    const control = event.target.closest("[data-action]");
+    if (!control) {
+      return;
+    }
+
+    const action = control.dataset.action;
+    if (action !== "score-review-prev" && action !== "score-review-next") {
+      return;
+    }
+
+    const nextPage = action === "score-review-prev"
+      ? state.ui.scoreReview.page - 1
+      : state.ui.scoreReview.page + 1;
+
+    try {
+      setStatus("score-review-status", "loading score review...");
+      await loadScoreReviewPage(nextPage);
+      renderAll();
+      setStatus(
+        "score-review-status",
+        state.ui.scoreReview.totalItems
+          ? `showing ${formatScoreReviewRange()}`
+          : "score result not available yet",
+      );
+    } catch (error) {
+      setStatus("score-review-status", error instanceof Error ? error.message : String(error), true);
+    }
+  });
 };
 
 const normalizeRuleForMode = (rule, assignmentMode) => {
@@ -1346,57 +1496,20 @@ const syncCategoriesRoutingStateFromDom = () => {
 
 const syncPoliciesStateFromDom = () => {
   const reviewPolicy = getReviewPolicy();
-  const reviewDestination = getDestination(DEFAULT_REVIEW_DESTINATION_KEY, {
-    destinationKey: DEFAULT_REVIEW_DESTINATION_KEY,
-    destinationType: "album",
-    immichResourceId: "",
-    config: {},
-    enabled: false,
-  });
-  const descriptionDestination = getDestination(DEFAULT_DESCRIPTION_DESTINATION_KEY, {
-    destinationKey: DEFAULT_DESCRIPTION_DESTINATION_KEY,
-    destinationType: "asset_description",
-    immichResourceId: DEFAULT_DESCRIPTION_RESOURCE_ID,
-    config: {},
-    enabled: true,
-  });
 
   const nextPolicy = {
     ...reviewPolicy,
-    displayName: document.getElementById("policy-display-name").value.trim() || "Review Policy",
+    displayName: document.getElementById("policy-display-name").value.trim() || "Trash Threshold Policy",
     executionMode: document.getElementById("policy-execution-mode").value,
     enabled: document.getElementById("policy-enabled").checked,
     display: {
       ...reviewPolicy.display,
       reviewThreshold: Number(document.getElementById("policy-review-threshold").value) || DEFAULT_REVIEW_THRESHOLD,
-      updateDescription: document.getElementById("policy-update-description").checked,
+      updateDescription: false,
     },
   };
 
-  const nextReviewDestination = {
-    ...reviewDestination,
-    destinationKey: DEFAULT_REVIEW_DESTINATION_KEY,
-    destinationType: "album",
-    immichResourceId: document.getElementById("review-album-id").value.trim(),
-    config: reviewDestination.config ?? {},
-    enabled: document.getElementById("review-album-enabled").checked,
-  };
-
-  const nextDescriptionDestination = {
-    ...descriptionDestination,
-    destinationKey: DEFAULT_DESCRIPTION_DESTINATION_KEY,
-    destinationType: "asset_description",
-    immichResourceId: document.getElementById("description-resource-id").value.trim() || DEFAULT_DESCRIPTION_RESOURCE_ID,
-    config: descriptionDestination.config ?? {},
-    enabled: document.getElementById("description-destination-enabled").checked,
-  };
-
   state.settings.policies = upsertByKey(state.settings.policies, "policyKey", nextPolicy);
-  state.settings.destinations = upsertByKey(
-    upsertByKey(state.settings.destinations, "destinationKey", nextReviewDestination),
-    "destinationKey",
-    nextDescriptionDestination,
-  );
 };
 
 const syncSchedulesStateFromDom = () => {
@@ -1795,7 +1908,9 @@ installSaveButtons();
 installSeedButton();
 installPersonGroupHandlers();
 installCategoriesRoutingHandlers();
+installScoreReviewHandlers();
 startLiveReload();
 refresh().catch((error) => {
+  setStatus("score-review-status", error instanceof Error ? error.message : String(error), true);
   setStatus("global-status", error instanceof Error ? error.message : String(error), true);
 });

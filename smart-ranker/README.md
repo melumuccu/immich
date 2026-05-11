@@ -7,39 +7,36 @@
 - Compose network 内での起動
 - 最小 GUI の起動
 - GUI からの Person Group / Categories & Routing / Policies / Jobs 設定更新
-- `collect`, `train`, `score`, `apply` の手動実行
+- `learn`, `score`, `apply` の手動実行
+- score review を独立 GUI でスコア順に確認
 - unittest 一式の実行
 
 ## 各 job が行うこと
 
-- `collect`: Immich から差分 asset を集め、feedback を取り込み、学習と推論に使う feature input を作る。
-- `train`: 収集済みデータから教師ラベルを再構成し、学習済みモデルと設定スナップショットを保存する。
-- `score`: 学習済みモデルで推論し、`inference_trace` と dry-run の `action_execution_log` を残す。
-- `apply`: 推論結果を使って Review アルバム追加や description 更新を実行し、`action_execution_log` を残す。
+- `learn`: Immich の favorite asset と trash asset だけを収集し、`favorite_signal` と `trash_signal` を更新したうえで学習済みモデルと設定スナップショットを保存する。favorite 解除や restore 後も signal は保持する。
+- `score`: すべての asset を学習済みモデルで採点し、`score_run` と `score_result` を保存する。GUI の score review page はこの結果をスコア順で 100 件ずつ表示する。
+- `apply`: 現在の threshold 以下の asset を trash へ移動し、`action_execution_log` と `apply_exclusion_asset` を残す。ここで trash へ移した asset は次回の `learn` では再収集しない。
 
 ## 日常での使い方と対象
 
-日常運用の基本順は `collect -> train -> score -> apply`。
+日常運用の基本順は `learn -> score -> apply`。
 
-- `collect`
-    - 日常での使い方: まず最初に回す。新規追加、更新、trash、restore の差分を取り込みたいときに使う。
-    - 対象: 初回は取得できる asset 全体。2 回目以降は `collector_cursor` 以後に更新された asset と、trash 状態が変わった asset が中心。手動で救済した asset の feedback もここで取り込む。
-- `train`
-    - 日常での使い方: Favorite、trash、救済 feedback が増えた後や、ルール変更後に回す。毎回必須ではなく、学習に使う判断材料が増えたタイミングで回す。
-    - 対象: 直前の `collect` で feature input 化された asset 群と、`feedback_event` に入った weak positive。教師ラベルは trash、archive、favorite、weak positive から再構成する。
+- `learn`
+    - 日常での使い方: favorite / trash を教師信号として取り込みたいときに回す。favorite 解除や restore 後も学習用 signal を残したいので、まずこれを回す。
+    - 対象: 現在 favorite の asset と、現在 trash にある asset。ただし `apply` によって trash へ移した asset は除外する。
 - `score`
-    - 日常での使い方: 反映前の確認に使う。まず dry-run で推論結果と planned action を見て、閾値やルールが妥当かを確認する。
-    - 対象: 直前の `collect` で入力化された asset のうち、`isTrashed = false` かつ `visibility = timeline` のもの。初回は実質的に全件、以降は通常は差分中心。
+    - 日常での使い方: 学習済みモデルで全件採点し、GUI の score review を更新したいときに回す。threshold 調整前の確認手順。
+    - 対象: Immich 上のすべての asset。
 - `apply`
-    - 日常での使い方: `score` の結果を見て問題なければ最後に回す。Review アルバム追加や description 更新を本当に反映したいときだけ使う。
-    - 対象: `score` と同じ asset 群。最新または指定した `model` を使って再度推論し、action policy に従って実書き込みする。
+    - 日常での使い方: score review で threshold を確認した後、threshold 以下の asset を本当に trash へ移したいときに回す。
+    - 対象: 直近の `score` で保存された `score_result`。すでに trash 済みの asset や自動 trash 済みで除外対象になった asset は再適用しない。
 
 ## 現在の制約
 
 - 日常コマンドは `mise run` 前提
 - task は workspace root の `.env` を読む
 - `/api/jobs/{job_type}` は同期実行
-- `score` は dry-run、`apply` は実書き込みあり
+- `score` は採点のみで書き込みなし、`apply` は実書き込みあり
 
 ## 前提
 
@@ -53,7 +50,6 @@
 - 必須: `SMART_RANKER_IMMICH_API_KEY`
 - 必須: `SMART_RANKER_IMMICH_USER_ID`
 - 任意: `SMART_RANKER_PORT`
-- 任意: `SMART_RANKER_REVIEW_ALBUM_ID`
 - 任意: `SMART_RANKER_REVIEW_THRESHOLD`
 
 Compose service 側で `SMART_RANKER_IMMICH_BASE_URL` と `SMART_RANKER_IMMICH_DB_DSN` を組み立てるため、root の `.env` に追加しなくてよい。
@@ -78,24 +74,6 @@ mise trust
 mise run install
 ```
 
-1. <span id="step-review-album-id"></span>Review Album の ID が必要なら取得する。
-
-```bash
-mise run review-album-id
-```
-
-別名のアルバムを引く場合:
-
-```bash
-ALBUM_NAME="Some Album" mise run review-album-id
-```
-
-1. [Review Album の ID 取得](#step-review-album-id)で得た値を必要に応じて workspace root の `.env` へ入れる。
-
-```dotenv
-SMART_RANKER_REVIEW_ALBUM_ID=replace-me
-```
-
 1. <span id="step-bootstrap-storage"></span>ローカル保存先と SQLite を初期化する。
 
 ```bash
@@ -106,7 +84,7 @@ mise run bootstrap
 
 - `state_dir=.../smart-ranker/var/local`
 - `db_path=.../smart-ranker/var/local/db/smart-ranker.sqlite3`
-- `applied_migrations=0001_initial_storage.sql`
+- `applied_migrations=0001_initial_storage.sql, 0002_collect_batch_cursor.sql, 0003_learning_runtime.sql`
 
 1. 初期 master data を投入する。
 
@@ -121,7 +99,7 @@ mise run seed-master-data
 - `routing_rules=9`
 - `policies=1`
 - `destinations=2`
-- `schedules=4`
+- `schedules=3`
 
 ## 最短の動作確認
 
@@ -154,26 +132,28 @@ http://127.0.0.1:8010/
 - `Smart Ranker Console` が表示される
 - `Person Group` に seed 済み JSON が入る
 - `Categories & Routing` に categories と routingRules の JSON が入る
-- `Policies` に review policy と destinations の JSON が入る
-- `Jobs & Models` に schedules JSON と model snapshot 一覧が出る
-- `Event Ledger`
+- `Policies` に trash threshold policy が出る
+- `Jobs & Models` に `learn`, `score`, `apply` の schedules と model snapshot 一覧が出る
+- `Event Ledger` に `Signals`, `Score Review`, `Apply Log` が出る
+- `score review` nav から独立一覧ページへ移動できる
 
 補足:
 
 - 画面右上の `seed defaults` からも既定 master data を再投入できる
 - JSON を編集して `save` を押すと backend 側の job 設定を再読込する
+- score review 一覧は `http://127.0.0.1:8010/score-review` でも直接開ける
 
-1. <span id="step-run-train"></span>train ジョブを実行する。
+1. <span id="step-run-learn"></span>learn ジョブを実行する。
 
 ```bash
-mise run train
+mise run learn
 ```
 
 期待値:
 
 - JSON に `jobRunId`, `jobType`, `status`, `submittedAt` が入る
 
-1. [train ジョブの実行](#step-run-train)で返った `jobRunId` を使って状態を確認する。
+1. [learn ジョブの実行](#step-run-learn)で返った `jobRunId` を使って状態を確認する。
 
 ```bash
 JOB_RUN_ID=<jobRunId> mise run job-status
@@ -181,30 +161,28 @@ JOB_RUN_ID=<jobRunId> mise run job-status
 
 期待値:
 
-- `jobType` が `train`
+- `jobType` が `learn`
 - `status` が `completed`
 - `result.runId` が入る
 - `result.modelCount` と `result.modelKeys` が入る
 
 ## よく使う task
 
-- `mise run review-album-id`: アルバム名から ID を検索する
 - `mise run seed-master-data`: 設計書準拠の初期 master data を投入する
+- `mise run learn`: signal 同期と学習をまとめて実行する
 
 ## 引数つき task
 
 - `JOB_RUN_ID` 必須: `mise run job-status` で指定する。`jobRunId` の状態を取得する。
-- `ALBUM_NAME` 任意: `mise run review-album-id` で指定する。既定は `Review Album`。
-- `SMART_RANKER_PORT` 任意: `collect`, `train`, `score`, `apply`, `job-status` で使う。既定は `8010`。
+- `SMART_RANKER_PORT` 任意: `learn`, `score`, `apply`, `job-status` で使う。既定は `8010`。
 
 例:
 
 ```bash
 JOB_RUN_ID=<jobRunId> mise run job-status
-ALBUM_NAME="Some Album" mise run review-album-id
 ```
 
-`collect`, `train`, `score`, `apply` は引数なし。workspace root の `.env` を読む。
+`learn`, `score`, `apply` は引数なし。workspace root の `.env` を読む。
 
 ## テストでの確認
 
@@ -226,7 +204,7 @@ mise run test
 
 期待値:
 
-- 現時点では `Ran 19 tests` と `OK`
+- 現時点では `Ran 31 tests` と `OK`
 
 ## 生成されるもの
 
@@ -240,6 +218,7 @@ mise run test
 ## 注意
 
 - env が不足している場合、job API は `status=failed` と設定エラーを返す
-- `train` と `score` は必要な前段結果が無ければ内部で `collect` や `train` を補完実行する
+- `score` は model が未作成なら内部で `learn` を補完実行する
+- `apply` は直近の `score_run` を使う。明示 `scoreRunId` が無ければ最新 completed run を参照する
 - app 起動時には Immich DB へ接続しない。DB 接続確認は job 実行時に行う
 - `unittest discover` は環境によって SQLite connection の `ResourceWarning` が出る場合がある

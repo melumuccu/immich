@@ -33,8 +33,9 @@ class MasterDataTest(unittest.TestCase):
             self.assertEqual(9, len(bundle["routingRules"]))
             self.assertEqual(1, len(bundle["policies"]))
             self.assertEqual(2, len(bundle["destinations"]))
-            self.assertEqual(4, len(bundle["schedules"]))
+            self.assertEqual(3, len(bundle["schedules"]))
             self.assertEqual({1000}, {item["batchSize"] for item in bundle["schedules"]})
+            self.assertEqual({"learn", "score", "apply"}, {item["jobType"] for item in bundle["schedules"]})
 
             category_keys = {item["categoryKey"] for item in bundle["categories"]}
             self.assertIn("person", category_keys)

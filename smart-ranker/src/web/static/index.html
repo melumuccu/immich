@@ -15,16 +15,16 @@
         </div>
         <nav class="route-nav" aria-label="Console sections">
           <a href="/" data-route-link="home">home</a>
+          <a href="/score-review" data-route-link="score-review">score review</a>
           <a href="/settings" data-route-link="settings">settings</a>
         </nav>
       </header>
 
       <section class="hero">
         <h1>Manual Jobs And Operating Surfaces</h1>
-        <p class="lede">差分収集、学習、推論、反映の manual run をトップで追い、人物グループやルーティング、ポリシー編集は settings 側へ分けた管理画面。</p>
+        <p class="lede">learn、score、apply の manual run をトップで追い、人物グループやルーティング、threshold 編集は settings 側へ分けた管理画面。</p>
         <div class="job-grid">
-          <button data-job="collect">collect</button>
-          <button data-job="train">train</button>
+          <button data-job="learn">learn</button>
           <button data-job="score">score</button>
           <button data-job="apply">apply</button>
         </div>
@@ -36,6 +36,11 @@
       </section>
 
       <section id="process-visualization" class="process-grid" aria-live="polite"></section>
+
+      <section class="score-review-page">
+        <div id="score-review-page" class="score-review-app"></div>
+        <p id="score-review-status" class="status-line">latest score review will appear here</p>
+      </section>
 
       <section class="panel-grid">
         <article class="panel">
@@ -64,7 +69,7 @@
           <div class="panel-header">
             <div>
               <h2>Policies</h2>
-              <p class="panel-note">review threshold、description 更新、Review Album の destination をフォームで編集する。</p>
+              <p class="panel-note">score review で使う trash threshold をフォームで編集する。</p>
             </div>
             <button data-save="policies" class="button-secondary" type="button">save</button>
           </div>
@@ -75,7 +80,7 @@
           <div class="panel-header">
             <div>
               <h2>Jobs &amp; Models</h2>
-              <p class="panel-note">job ごとの schedule をカードで調整し、train snapshot は下で読む。</p>
+              <p class="panel-note">learn / score / apply の schedule をカードで調整し、learn snapshot は下で読む。</p>
             </div>
             <button data-save="schedules" class="button-secondary" type="button">save</button>
           </div>
@@ -87,15 +92,16 @@
           <h2>Event Ledger</h2>
           <div class="ledger-columns">
             <div>
-              <h3>Feedback</h3>
+              <h3>Signals</h3>
               <ul id="ledger-feedback"></ul>
             </div>
             <div>
-              <h3>Inference</h3>
+              <h3>Score Review</h3>
+              <p class="subtle">一覧は <a href="/score-review">score review page</a> で 100 件ずつ確認します。</p>
               <ul id="ledger-traces"></ul>
             </div>
             <div>
-              <h3>Action Log</h3>
+              <h3>Apply Log</h3>
               <ul id="ledger-actions"></ul>
             </div>
           </div>

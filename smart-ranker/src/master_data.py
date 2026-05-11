@@ -270,7 +270,7 @@ def build_default_master_data(
         "policies": [
             {
                 "policyKey": DEFAULT_REVIEW_POLICY_KEY,
-                "displayName": "Review Policy",
+                "displayName": "Trash Threshold Policy",
                 "executionMode": "manual",
                 "display": {
                     "reviewThreshold": review_threshold,
@@ -297,15 +297,7 @@ def build_default_master_data(
         ],
         "schedules": [
             {
-                "jobType": "collect",
-                "runMode": "manual",
-                "cronExpr": None,
-                "dryRun": False,
-                "batchSize": 1000,
-                "enabled": True,
-            },
-            {
-                "jobType": "train",
+                "jobType": "learn",
                 "runMode": "manual",
                 "cronExpr": None,
                 "dryRun": False,

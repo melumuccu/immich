@@ -7,11 +7,16 @@ from smart_ranker.immich_client import ActionWriteClient, AssetReadClient, Immic
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, payload) -> None:
+    def __init__(self, status_code: int, payload, *, headers: dict[str, str] | None = None) -> None:
         self.status_code = status_code
         self._payload = payload
-        self.text = json.dumps(payload) if payload is not None else ""
-        self.content = self.text.encode("utf-8") if payload is not None else b""
+        self.headers = headers or {}
+        if isinstance(payload, bytes):
+            self.content = payload
+            self.text = payload.decode("utf-8", errors="ignore")
+        else:
+            self.text = json.dumps(payload) if payload is not None else ""
+            self.content = self.text.encode("utf-8") if payload is not None else b""
 
     def json(self):
         return self._payload
@@ -157,6 +162,31 @@ class ImmichClientTest(unittest.TestCase):
         self.assertEqual("http://immich.local/api/people", fake_session.calls[2]["url"])
         self.assertEqual({"page": 2, "size": 50, "withHidden": "true"}, fake_session.calls[2]["params"])
 
+    def test_asset_thumbnail_uses_binary_thumbnail_route(self) -> None:
+        fake_session = FakeRequestsSession(
+            [
+                FakeResponse(
+                    200,
+                    b"thumbnail-bytes",
+                    headers={
+                        "Content-Type": "image/webp",
+                        "Cache-Control": "public, max-age=60",
+                        "ETag": '"thumb-1"',
+                    },
+                )
+            ]
+        )
+        session = ImmichSession(base_url="http://immich.local", api_key="secret", session=fake_session)
+
+        thumbnail = AssetReadClient(session).get_asset_thumbnail("asset-1")
+
+        self.assertEqual(b"thumbnail-bytes", thumbnail.payload)
+        self.assertEqual("image/webp", thumbnail.content_type)
+        self.assertEqual("public, max-age=60", thumbnail.cache_control)
+        self.assertEqual('"thumb-1"', thumbnail.etag)
+        self.assertEqual("GET", fake_session.calls[0]["method"])
+        self.assertEqual("http://immich.local/api/assets/asset-1/thumbnail", fake_session.calls[0]["url"])
+
     def test_people_search_falls_back_to_people_list_when_search_api_rejects_query(self) -> None:
         fake_session = FakeRequestsSession(
             [
@@ -199,6 +229,7 @@ class ImmichClientTest(unittest.TestCase):
                 FakeResponse(200, {"id": "asset-1"}),
                 FakeResponse(200, [{"id": "asset-1", "success": True}]),
                 FakeResponse(200, [{"id": "asset-1", "success": True}]),
+                FakeResponse(200, [{"id": "asset-1", "success": True}]),
                 FakeResponse(200, {"count": 1}),
             ]
         )
@@ -208,13 +239,18 @@ class ImmichClientTest(unittest.TestCase):
         action_client.update_asset("asset-1", {"description": "score=0.1"})
         action_client.add_assets_to_album("album-1", ["asset-1"])
         action_client.tag_assets("tag-1", ["asset-1"])
+        trash_result = action_client.trash_assets(["asset-1"])
         restore_result = action_client.restore_assets(["asset-1"])
 
+        self.assertTrue(trash_result.ok)
         self.assertTrue(restore_result.ok)
         self.assertEqual("http://immich.local/api/assets/asset-1", fake_session.calls[0]["url"])
         self.assertEqual("http://immich.local/api/albums/album-1/assets", fake_session.calls[1]["url"])
         self.assertEqual("http://immich.local/api/tags/tag-1/assets", fake_session.calls[2]["url"])
-        self.assertEqual("http://immich.local/api/trash/restore/assets", fake_session.calls[3]["url"])
+        self.assertEqual("http://immich.local/api/assets", fake_session.calls[3]["url"])
+        self.assertEqual("DELETE", fake_session.calls[3]["method"])
+        self.assertEqual({"ids": ["asset-1"], "force": False}, fake_session.calls[3]["json"])
+        self.assertEqual("http://immich.local/api/trash/restore/assets", fake_session.calls[4]["url"])
 
 
 if __name__ == "__main__":

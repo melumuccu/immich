@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +13,7 @@ from smart_ranker.feature_pipeline import (
     PersonLabelConfig,
 )
 from smart_ranker.immich_client import ActionResult, AssetSnapshot
-from smart_ranker.inference import ActionExecutor, ApplyConfig, InferenceJob
+from smart_ranker.inference import ActionExecutor, InferenceJob
 from smart_ranker.storage import bootstrap_storage
 from smart_ranker.storage.repository import StorageRepository
 from smart_ranker.training import TrainingJob, WeakPositiveSignal
@@ -45,54 +44,30 @@ def make_asset(
 
 class FakeActionClient:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, dict[str, object] | list[str]]] = []
+        self.calls: list[tuple[str, object, object]] = []
 
-    def add_assets_to_album(self, album_id: str, asset_ids: list[str]) -> ActionResult:
-        self.calls.append(("add_assets_to_album", album_id, asset_ids))
-        return ActionResult(status_code=200, ok=True, payload={"albumId": album_id, "ids": asset_ids})
-
-    def update_asset(self, asset_id: str, payload: dict[str, object]) -> ActionResult:
-        self.calls.append(("update_asset", asset_id, payload))
-        return ActionResult(status_code=200, ok=True, payload={"assetId": asset_id, **payload})
+    def trash_assets(self, asset_ids: list[str], *, force: bool = False) -> ActionResult:
+        self.calls.append(("trash_assets", list(asset_ids), {"force": force}))
+        return ActionResult(status_code=200, ok=True, payload={"ids": list(asset_ids), "force": force})
 
 
 class InferenceTest(unittest.TestCase):
-    def test_inference_job_records_trace_and_dry_run_logs_without_api_calls(self) -> None:
+    def test_score_all_assets_persists_score_run_and_results(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository, paths, feature_assembler, label_resolver, training_result = self._prepare_training(Path(temp_dir))
-            repository.insert_action_policy(
-                policy_id="policy-1",
-                profile_id="profile-1",
-                policy_key="review-policy",
-                display_name="review",
-                execution_mode="manual",
-            )
-            repository.insert_action_destination(
-                destination_id="dest-review",
-                profile_id="profile-1",
-                destination_key="review-album",
-                destination_type="album",
-                immich_resource_id="album-1",
-            )
-            repository.insert_action_destination(
-                destination_id="dest-description",
-                profile_id="profile-1",
-                destination_key="asset-description",
-                destination_type="asset_description",
-                immich_resource_id="asset-description",
-            )
 
-            candidate_input = AssetFeatureInput(
-                asset=make_asset(asset_id="candidate-1", file_name="invoice-low.jpg", path="/docs/invoice-low.jpg"),
-                embedding=[-1.4, -1.1],
-                ocr_text="invoice overdue",
-            )
-            skipped_input = AssetFeatureInput(
-                asset=make_asset(asset_id="skip-1", visibility="archive"),
-                embedding=[-0.1, -0.2],
-            )
-            inputs = [candidate_input, skipped_input]
-            resolutions = [label_resolver.resolve(asset_input) for asset_input in inputs]
+            score_inputs = [
+                AssetFeatureInput(
+                    asset=make_asset(asset_id="candidate-low", file_name="invoice-low.jpg", path="/docs/invoice-low.jpg"),
+                    embedding=[-1.4, -1.1],
+                    ocr_text="invoice overdue",
+                ),
+                AssetFeatureInput(
+                    asset=make_asset(asset_id="candidate-high", people=("kid-1",)),
+                    embedding=[1.9, 1.4],
+                ),
+            ]
+            score_resolutions = [label_resolver.resolve(asset_input) for asset_input in score_inputs]
 
             action_client = FakeActionClient()
             inference_job = InferenceJob(
@@ -102,63 +77,57 @@ class InferenceTest(unittest.TestCase):
                 ActionExecutor(repository, action_client, profile_id="profile-1"),
                 profile_id="profile-1",
             )
-            result = inference_job.score_and_apply(
-                inputs,
-                resolutions,
+            summary = inference_job.score_all_assets(
+                score_inputs,
+                score_resolutions,
                 model_run_id=training_result.run_id,
-                apply_config=ApplyConfig(
-                    action_policy_id="policy-1",
-                    review_album_destination_id="dest-review",
-                    review_album_resource_id="album-1",
-                    description_destination_id="dest-description",
-                    review_threshold=0.5,
-                ),
+                threshold_value=0.5,
                 occurred_at="2026-05-09T12:30:00Z",
-                dry_run=True,
             )
 
-            self.assertEqual(1, len(result))
+            self.assertEqual(2, summary.scored_asset_count)
             self.assertEqual([], action_client.calls)
 
-            traces = repository.list_inference_traces("profile-1")
-            self.assertEqual(1, len(traces))
-            self.assertEqual("candidate-1", traces[0]["immich_asset_id"])
+            latest_score_run = repository.get_latest_completed_score_run("profile-1")
+            self.assertIsNotNone(latest_score_run)
+            self.assertEqual(summary.score_run_id, latest_score_run["id"])
 
-            logs = repository.list_action_execution_logs("profile-1")
-            self.assertEqual(2, len(logs))
-            self.assertTrue(all(log["dry_run"] == 1 for log in logs))
-            self.assertTrue(all(log["status"] == "planned" for log in logs))
+            score_results = repository.list_score_results("profile-1", score_run_id=summary.score_run_id)
+            self.assertEqual(2, len(score_results))
+            self.assertEqual("candidate-low", score_results[0]["immich_asset_id"])
+            self.assertEqual("candidate-high", score_results[1]["immich_asset_id"])
 
-    def test_inference_job_executes_album_and_description_updates(self) -> None:
+    def test_apply_score_threshold_trashes_only_low_score_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository, paths, feature_assembler, label_resolver, training_result = self._prepare_training(Path(temp_dir))
             repository.insert_action_policy(
                 policy_id="policy-1",
                 profile_id="profile-1",
                 policy_key="review-policy",
-                display_name="review",
+                display_name="Trash Threshold Policy",
                 execution_mode="manual",
             )
             repository.insert_action_destination(
-                destination_id="dest-review",
+                destination_id="dest-trash",
                 profile_id="profile-1",
-                destination_key="review-album",
-                destination_type="album",
-                immich_resource_id="album-1",
-            )
-            repository.insert_action_destination(
-                destination_id="dest-description",
-                profile_id="profile-1",
-                destination_key="asset-description",
-                destination_type="asset_description",
-                immich_resource_id="asset-description",
+                destination_key="trash-bin",
+                destination_type="trash",
+                immich_resource_id="trash",
             )
 
-            candidate_input = AssetFeatureInput(
-                asset=make_asset(asset_id="candidate-1", file_name="invoice-low.jpg", path="/docs/invoice-low.jpg"),
-                embedding=[-1.4, -1.1],
-                ocr_text="invoice overdue",
-            )
+            score_inputs = [
+                AssetFeatureInput(
+                    asset=make_asset(asset_id="candidate-low", file_name="invoice-low.jpg", path="/docs/invoice-low.jpg"),
+                    embedding=[-1.4, -1.1],
+                    ocr_text="invoice overdue",
+                ),
+                AssetFeatureInput(
+                    asset=make_asset(asset_id="candidate-high", people=("kid-1",)),
+                    embedding=[1.9, 1.4],
+                ),
+            ]
+            score_resolutions = [label_resolver.resolve(asset_input) for asset_input in score_inputs]
+
             action_client = FakeActionClient()
             inference_job = InferenceJob(
                 paths,
@@ -167,31 +136,35 @@ class InferenceTest(unittest.TestCase):
                 ActionExecutor(repository, action_client, profile_id="profile-1"),
                 profile_id="profile-1",
             )
-
-            inference_job.score_and_apply(
-                [candidate_input],
-                [label_resolver.resolve(candidate_input)],
+            summary = inference_job.score_all_assets(
+                score_inputs,
+                score_resolutions,
                 model_run_id=training_result.run_id,
-                apply_config=ApplyConfig(
-                    action_policy_id="policy-1",
-                    review_album_destination_id="dest-review",
-                    review_album_resource_id="album-1",
-                    description_destination_id="dest-description",
-                    review_threshold=0.5,
-                ),
+                threshold_value=0.5,
                 occurred_at="2026-05-09T12:30:00Z",
+            )
+
+            applied_records = inference_job.apply_score_threshold(
+                score_run_id=summary.score_run_id,
+                threshold_value=0.5,
+                action_policy_id="policy-1",
+                destination_id="dest-trash",
+                occurred_at="2026-05-09T12:31:00Z",
                 dry_run=False,
             )
 
-            self.assertEqual(2, len(action_client.calls))
-            self.assertEqual("add_assets_to_album", action_client.calls[0][0])
-            self.assertEqual("update_asset", action_client.calls[1][0])
+            self.assertEqual(1, len(applied_records))
+            self.assertEqual("candidate-low", applied_records[0].immich_asset_id)
+            self.assertEqual(1, len(action_client.calls))
+            self.assertEqual("trash_assets", action_client.calls[0][0])
 
-            logs = repository.list_action_execution_logs("profile-1")
-            self.assertEqual(2, len(logs))
-            self.assertTrue(all(log["status"] == "executed" for log in logs))
-            update_request = json.loads(logs[1]["request_json"])
-            self.assertIn("smart-ranker score=", update_request["description"])
+            action_logs = repository.list_action_execution_logs("profile-1")
+            self.assertEqual(1, len(action_logs))
+            self.assertEqual("executed", action_logs[0]["status"])
+
+            exclusions = repository.list_apply_exclusion_assets("profile-1")
+            self.assertEqual(1, len(exclusions))
+            self.assertEqual("candidate-low", exclusions[0]["immich_asset_id"])
 
     @staticmethod
     def _prepare_training(temp_root: Path):

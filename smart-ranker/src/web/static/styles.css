@@ -183,6 +183,12 @@ button:hover {
   margin-bottom: 20px;
 }
 
+.score-review-page {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
 .process-summary {
   display: grid;
   gap: 18px;
@@ -361,8 +367,16 @@ body[data-route="home"] .panel-grid {
   display: none;
 }
 
+body[data-route="home"] .score-review-page {
+  display: none;
+}
+
 body[data-route="settings"] .hero,
 body[data-route="settings"] .process-grid {
+  display: none;
+}
+
+body[data-route="settings"] .score-review-page {
   display: none;
 }
 
@@ -372,6 +386,74 @@ body[data-route="settings"] .panel-grid {
 
 body[data-route="settings"] .panel-wide {
   grid-column: auto;
+}
+
+body[data-route="score-review"] .hero,
+body[data-route="score-review"] .process-grid,
+body[data-route="score-review"] .panel-grid {
+  display: none;
+}
+
+.score-review-app {
+  display: grid;
+  gap: 14px;
+}
+
+.score-review-toolbar,
+.score-review-summary,
+.score-review-card-head,
+.score-review-card-foot,
+.score-review-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.score-review-summary,
+.score-review-pager,
+.score-review-card-foot {
+  flex-wrap: wrap;
+}
+
+.score-review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.score-review-card {
+  overflow: hidden;
+}
+
+.score-review-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(236, 190, 145, 0.24) 0%, rgba(122, 45, 17, 0.08) 100%);
+}
+
+.score-review-card-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.score-review-score {
+  font-family: "Iowan Old Style", "Times New Roman", serif;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.score-review-path {
+  margin: 0;
+  word-break: break-word;
+}
+
+.score-review-empty {
+  padding: 28px;
 }
 
 .settings-app {
@@ -676,14 +758,20 @@ button:disabled {
 @media (width < calc(860 / 16 * 1rem)) {
   .topbar,
   .stage-header,
-  .activity-meta {
+  .activity-meta,
+  .score-review-toolbar,
+  .score-review-summary,
+  .score-review-card-head,
+  .score-review-card-foot,
+  .score-review-pager {
     flex-direction: column;
     align-items: stretch;
   }
 
   .process-grid,
   .panel-grid,
-  .ledger-columns {
+  .ledger-columns,
+  .score-review-grid {
     grid-template-columns: 1fr;
   }
 

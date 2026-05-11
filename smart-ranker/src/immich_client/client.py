@@ -22,8 +22,10 @@ class CapabilityRegistry:
     people_path: str = "people"
     asset_path: str = "assets"
     asset_ocr_suffix: str = "ocr"
+    asset_thumbnail_suffix: str = "thumbnail"
     album_path: str = "albums"
     tag_path: str = "tags"
+    trash_assets_path: str = "assets"
     trash_restore_assets_path: str = "trash/restore/assets"
 
 
@@ -41,6 +43,23 @@ class AssetReadClient:
             f"{self.capabilities.asset_path}/{asset_id}/{self.capabilities.asset_ocr_suffix}"
         )
         return normalize_action_result(response.status_code, response.payload)
+
+    def get_asset_thumbnail(
+        self,
+        asset_id: str,
+        *,
+        size: str | None = None,
+        format: str | None = None,
+    ):
+        params: dict[str, Any] = {}
+        if size:
+            params["size"] = size
+        if format:
+            params["format"] = format
+        return self.session.get_bytes(
+            f"{self.capabilities.asset_path}/{asset_id}/{self.capabilities.asset_thumbnail_suffix}",
+            params=params or None,
+        )
 
     def search_metadata(self, payload: dict[str, Any]) -> SearchResult:
         response = self.session.post(self.capabilities.search_metadata_path, json_body=payload)
@@ -142,6 +161,13 @@ class ActionWriteClient:
         response = self.session.put(
             f"{self.capabilities.tag_path}/{tag_id}/assets",
             json_body={"ids": list(asset_ids)},
+        )
+        return normalize_action_result(response.status_code, response.payload)
+
+    def trash_assets(self, asset_ids: Iterable[str], *, force: bool = False) -> ActionResult:
+        response = self.session.delete(
+            self.capabilities.trash_assets_path,
+            json_body={"ids": list(asset_ids), "force": force},
         )
         return normalize_action_result(response.status_code, response.payload)
 

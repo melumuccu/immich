@@ -25,6 +25,13 @@ EXPECTED_TABLES = {
     "feedback_event",
     "inference_trace",
     "action_execution_log",
+    "favorite_signal",
+    "trash_signal",
+    "apply_exclusion_asset",
+    "score_threshold_policy",
+    "score_run",
+    "score_result",
+    "job_run",
 }
 
 
@@ -41,7 +48,11 @@ class StorageBootstrapTest(unittest.TestCase):
             self.assertTrue(first_result.paths.logs_dir.is_dir())
             self.assertTrue(first_result.paths.db_path.is_file())
             self.assertEqual(
-                ["0001_initial_storage.sql", "0002_collect_batch_cursor.sql"],
+                [
+                    "0001_initial_storage.sql",
+                    "0002_collect_batch_cursor.sql",
+                    "0003_learning_runtime.sql",
+                ],
                 first_result.migration_result.applied_migrations,
             )
 
@@ -56,7 +67,11 @@ class StorageBootstrapTest(unittest.TestCase):
             second_result = bootstrap_storage(state_dir=state_dir)
             self.assertEqual([], second_result.migration_result.applied_migrations)
             self.assertEqual(
-                ["0001_initial_storage.sql", "0002_collect_batch_cursor.sql"],
+                [
+                    "0001_initial_storage.sql",
+                    "0002_collect_batch_cursor.sql",
+                    "0003_learning_runtime.sql",
+                ],
                 second_result.migration_result.skipped_migrations,
             )
 

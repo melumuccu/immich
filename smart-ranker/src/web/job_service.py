@@ -4,24 +4,18 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable
 from uuid import uuid4
 
-from smart_ranker.collector import AssetDiffCollector, RescueFeedbackInput
-from smart_ranker.feature_pipeline import (
-    AssetFeatureInput,
-    AssetFeatureInputBuilder,
-    FeatureAssembler,
-    LabelResolution,
-    LabelResolver,
-)
+from smart_ranker.feature_pipeline import AssetFeatureInputBuilder, FeatureAssembler, LabelResolver
 from smart_ranker.immich_client import ActionWriteClient, AssetReadClient, ImmichSession
 from smart_ranker.immich_db_reader import ImmichDbConfig, ImmichDbReader
-from smart_ranker.inference import ActionExecutor, ApplyConfig, InferenceJob
+from smart_ranker.inference import ActionExecutor, InferenceJob
+from smart_ranker.learning import ManualSignalCollector, fetch_assets_by_search
 from smart_ranker.master_data import load_runtime_settings
 from smart_ranker.storage.paths import StoragePaths
 from smart_ranker.storage.repository import StorageRepository
-from smart_ranker.training import TrainingJob, TrainingResult, WeakPositiveSignal
+from smart_ranker.training import TrainingJob, TrainingResult
 
 IMMICH_BASE_URL_ENV = "SMART_RANKER_IMMICH_BASE_URL"
 IMMICH_API_KEY_ENV = "SMART_RANKER_IMMICH_API_KEY"
@@ -30,14 +24,13 @@ IMMICH_USER_ID_ENV = "SMART_RANKER_IMMICH_USER_ID"
 REVIEW_ALBUM_ID_ENV = "SMART_RANKER_REVIEW_ALBUM_ID"
 REVIEW_THRESHOLD_ENV = "SMART_RANKER_REVIEW_THRESHOLD"
 
-JOB_TYPES = ("collect", "train", "score", "apply")
+JOB_TYPES = ("learn", "score", "apply")
 DEFAULT_REVIEW_THRESHOLD = 0.5
-DEFAULT_COLLECT_BATCH_SIZE = 1000
+DEFAULT_BATCH_SIZE = 1000
 DEFAULT_POLICY_KEY = "review-policy"
-DEFAULT_POLICY_DISPLAY_NAME = "Review Policy"
-DEFAULT_REVIEW_DESTINATION_KEY = "review-album"
-DEFAULT_DESCRIPTION_DESTINATION_KEY = "asset-description"
-DEFAULT_DESCRIPTION_RESOURCE_ID = "asset-description"
+DEFAULT_POLICY_DISPLAY_NAME = "Trash Threshold Policy"
+DEFAULT_TRASH_DESTINATION_KEY = "trash-bin"
+DEFAULT_TRASH_DESTINATION_RESOURCE_ID = "trash"
 
 
 def utc_now_iso() -> str:
@@ -67,8 +60,7 @@ class JobRuntimeConfig:
         }
         missing = [name for name, value in env_values.items() if not value]
         if missing:
-            joined = ", ".join(missing)
-            raise JobConfigurationError(f"Missing runtime configuration: {joined}")
+            raise JobConfigurationError(f"Missing runtime configuration: {', '.join(missing)}")
 
         review_threshold_raw = os.getenv(REVIEW_THRESHOLD_ENV)
         review_threshold = DEFAULT_REVIEW_THRESHOLD
@@ -76,9 +68,7 @@ class JobRuntimeConfig:
             try:
                 review_threshold = float(review_threshold_raw)
             except ValueError as error:
-                raise JobConfigurationError(
-                    f"Invalid {REVIEW_THRESHOLD_ENV}: {review_threshold_raw}"
-                ) from error
+                raise JobConfigurationError(f"Invalid {REVIEW_THRESHOLD_ENV}: {review_threshold_raw}") from error
 
         return cls(
             immich_base_url=env_values[IMMICH_BASE_URL_ENV] or "",
@@ -92,9 +82,8 @@ class JobRuntimeConfig:
 
 @dataclass
 class JobRuntimeCache:
-    feature_inputs: list[AssetFeatureInput] = field(default_factory=list)
-    label_resolutions: list[LabelResolution] = field(default_factory=list)
     training_result: TrainingResult | None = None
+    latest_score_run_id: str | None = None
 
 
 class SmartRankerJobRunner:
@@ -103,123 +92,125 @@ class SmartRankerJobRunner:
         *,
         storage_paths: StoragePaths,
         repository: StorageRepository,
-        collector: AssetDiffCollector,
+        asset_client: Any,
+        signal_collector: ManualSignalCollector,
         feature_input_builder: AssetFeatureInputBuilder,
         label_resolver: LabelResolver,
         training_job: TrainingJob,
         inference_job: InferenceJob,
         profile_id: str,
         immich_user_id: str,
-        collect_batch_size: int,
-        review_album_resource_id: str | None,
+        batch_size: int,
         review_threshold: float,
-        update_description: bool,
         now_factory: Callable[[], str],
     ) -> None:
         self.storage_paths = storage_paths
         self.repository = repository
-        self.collector = collector
+        self.asset_client = asset_client
+        self.signal_collector = signal_collector
         self.feature_input_builder = feature_input_builder
         self.label_resolver = label_resolver
         self.training_job = training_job
         self.inference_job = inference_job
         self.profile_id = profile_id
         self.immich_user_id = immich_user_id
-        self.collect_batch_size = collect_batch_size
-        self.review_album_resource_id = review_album_resource_id
+        self.batch_size = batch_size
         self.review_threshold = review_threshold
-        self.update_description = update_description
         self.now_factory = now_factory
         self.cache = JobRuntimeCache()
 
     def handlers(self) -> dict[str, Callable[[dict[str, Any]], dict[str, Any]]]:
         return {
-            "collect": self.collect,
-            "train": self.train,
+            "learn": self.learn,
             "score": self.score,
             "apply": self.apply,
         }
 
-    def collect(self, payload: dict[str, Any]) -> dict[str, Any]:
-        rescued_assets = self._parse_rescued_assets(payload.get("rescuedAssets", ()))
-        collect_result = self.collector.collect(
-            rescued_assets=rescued_assets,
-            max_assets=self._resolve_collect_batch_size(payload),
-        )
-        build_result = self.feature_input_builder.build(collect_result.assets)
+    def learn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        batch_size = self._resolve_batch_size(payload)
+        sync_result = self.signal_collector.sync(batch_size=batch_size, max_assets=payload.get("maxAssets"))
+        build_result = self.feature_input_builder.build(sync_result.training_assets)
         resolutions = [self.label_resolver.resolve(asset_input) for asset_input in build_result.inputs]
-
-        self.cache.feature_inputs = list(build_result.inputs)
-        self.cache.label_resolutions = resolutions
-        self.cache.training_result = None
-
-        return {
-            "runId": collect_result.run_id,
-            "assetCount": len(collect_result.assets),
-            "featureInputCount": len(build_result.inputs),
-            "missingEmbeddingAssetIds": list(build_result.missing_embedding_asset_ids),
-            "feedbackCount": collect_result.feedback_count,
-            "cursorUpdatedAfter": collect_result.cursor_after.updated_after,
-            "batchSize": collect_result.batch_size,
-            "hasMore": collect_result.has_more,
-            "nextPage": collect_result.next_page,
-            "pendingWindowUpdatedBefore": collect_result.cursor_after.pending_updated_before,
-        }
-
-    def train(self, payload: dict[str, Any]) -> dict[str, Any]:
-        inputs, resolutions = self._ensure_inputs(payload)
         training_result = self.training_job.train(
-            inputs,
+            build_result.inputs,
             resolutions,
-            weak_positive_signals=self._load_weak_positive_signals(),
+            weak_positive_signals=(),
             trained_at=self.now_factory(),
         )
         self.cache.training_result = training_result
+        self.cache.latest_score_run_id = None
 
         return {
             "runId": training_result.run_id,
+            "favoriteSignalCount": len(sync_result.favorite_assets),
+            "trashSignalCount": len(sync_result.trash_assets),
+            "trainingAssetCount": len(sync_result.training_assets),
+            "featureInputCount": len(build_result.inputs),
+            "missingEmbeddingAssetIds": list(build_result.missing_embedding_asset_ids),
+            "favoriteClearedCount": sync_result.favorite_cleared_count,
+            "trashRestoredCount": sync_result.trash_restored_count,
+            "excludedTrashCount": sync_result.excluded_trash_count,
             "modelCount": len(training_result.artifacts),
             "modelKeys": sorted(training_result.artifacts),
             "snapshotPath": str(training_result.snapshot_path),
+            "batchSize": batch_size,
         }
 
     def score(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._run_inference(payload, dry_run=True)
-
-    def apply(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._run_inference(payload, dry_run=bool(payload.get("dryRun", False)))
-
-    def _run_inference(self, payload: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
-        inputs, resolutions = self._ensure_inputs(payload)
+        batch_size = self._resolve_batch_size(payload)
         model_run_id = self._resolve_model_run_id(payload)
-        apply_config = self._ensure_apply_config(payload)
-        records = self.inference_job.score_and_apply(
-            inputs,
+        assets = fetch_assets_by_search(
+            self.asset_client,
+            batch_size=batch_size,
+            max_assets=payload.get("maxAssets"),
+        )
+        build_result = self.feature_input_builder.build(assets)
+        resolutions = [self.label_resolver.resolve(asset_input) for asset_input in build_result.inputs]
+        threshold_value = float(payload.get("reviewThreshold", self.review_threshold))
+        summary = self.inference_job.score_all_assets(
+            build_result.inputs,
             resolutions,
             model_run_id=model_run_id,
-            apply_config=apply_config,
+            threshold_value=threshold_value,
             occurred_at=self.now_factory(),
-            dry_run=dry_run,
         )
+        self.cache.latest_score_run_id = summary.score_run_id
+
         return {
             "modelRunId": model_run_id,
-            "traceCount": len(records),
-            "traceIds": [record.trace_id for record in records],
-            "dryRun": dry_run,
+            "scoreRunId": summary.score_run_id,
+            "assetCount": summary.asset_count,
+            "scoredAssetCount": summary.scored_asset_count,
+            "threshold": summary.threshold_value,
+            "missingEmbeddingAssetIds": list(build_result.missing_embedding_asset_ids),
         }
 
-    def _ensure_inputs(self, payload: dict[str, Any]) -> tuple[Sequence[AssetFeatureInput], Sequence[LabelResolution]]:
-        force_collect = bool(payload.get("forceCollect", False))
-        if force_collect or not self.cache.feature_inputs:
-            self.collect({})
-        return self.cache.feature_inputs, self.cache.label_resolutions
+    def apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        score_run_id = self._resolve_score_run_id(payload)
+        threshold_value = float(payload.get("reviewThreshold", self.review_threshold))
+        action_policy_id, destination_id = self._ensure_apply_context()
+        records = self.inference_job.apply_score_threshold(
+            score_run_id=score_run_id,
+            threshold_value=threshold_value,
+            action_policy_id=action_policy_id,
+            destination_id=destination_id,
+            occurred_at=self.now_factory(),
+            dry_run=bool(payload.get("dryRun", False)),
+        )
+        return {
+            "scoreRunId": score_run_id,
+            "appliedCount": len(records),
+            "assetIds": [record.immich_asset_id for record in records],
+            "threshold": threshold_value,
+            "dryRun": bool(payload.get("dryRun", False)),
+        }
 
-    def _resolve_collect_batch_size(self, payload: dict[str, Any]) -> int:
-        raw_value = payload.get("batchSize", self.collect_batch_size)
+    def _resolve_batch_size(self, payload: dict[str, Any]) -> int:
+        raw_value = payload.get("batchSize", self.batch_size)
         try:
             return max(1, int(raw_value))
         except (TypeError, ValueError):
-            return self.collect_batch_size
+            return self.batch_size
 
     def _resolve_model_run_id(self, payload: dict[str, Any]) -> str:
         explicit_model_run_id = payload.get("modelRunId")
@@ -232,10 +223,10 @@ class SmartRankerJobRunner:
         if latest_model_run_id is not None:
             return latest_model_run_id
 
-        training_result = self.train({})
-        run_id = training_result.get("runId")
+        learn_result = self.learn({})
+        run_id = learn_result.get("runId")
         if not run_id:
-            raise JobConfigurationError("No model run available for inference")
+            raise JobConfigurationError("No model run available for score")
         return str(run_id)
 
     def _latest_model_run_id(self) -> str | None:
@@ -246,109 +237,35 @@ class SmartRankerJobRunner:
                 return str(run_id)
         return None
 
-    def _load_weak_positive_signals(self) -> list[WeakPositiveSignal]:
-        signals: list[WeakPositiveSignal] = []
-        for row in self.repository.list_feedback_events(self.profile_id):
-            immich_asset_id = row["immich_asset_id"]
-            if not immich_asset_id:
-                continue
-            signals.append(
-                WeakPositiveSignal(
-                    immich_asset_id=str(immich_asset_id),
-                    sample_weight=float(row["sample_weight"]),
-                    label_value=float(row["label_value"]),
-                    feedback_type=str(row["feedback_type"]),
-                )
-            )
-        return signals
+    def _resolve_score_run_id(self, payload: dict[str, Any]) -> str:
+        explicit_score_run_id = payload.get("scoreRunId")
+        if explicit_score_run_id:
+            return str(explicit_score_run_id)
+        if self.cache.latest_score_run_id is not None:
+            return self.cache.latest_score_run_id
 
-    def _ensure_apply_config(self, payload: dict[str, Any]) -> ApplyConfig:
+        latest_score_run = self.repository.get_latest_completed_score_run(self.profile_id)
+        if latest_score_run is None:
+            raise JobConfigurationError("No score run available for apply")
+        return str(latest_score_run["id"])
+
+    def _ensure_apply_context(self) -> tuple[str, str]:
         self.repository.ensure_profile(profile_id=self.profile_id, immich_user_id=self.immich_user_id)
-        policy_rows = self.repository.list_action_policies(self.profile_id)
-        action_policy_id = next(
-            (str(row["id"]) for row in policy_rows if row["policy_key"] == DEFAULT_POLICY_KEY),
-            None,
+        action_policy_id = self.repository.ensure_action_policy(
+            policy_id=f"{self.profile_id}-{DEFAULT_POLICY_KEY}",
+            profile_id=self.profile_id,
+            policy_key=DEFAULT_POLICY_KEY,
+            display_name=DEFAULT_POLICY_DISPLAY_NAME,
+            execution_mode="manual",
         )
-        if action_policy_id is None:
-            action_policy_id = self.repository.ensure_action_policy(
-                policy_id=f"{self.profile_id}-review-policy",
-                profile_id=self.profile_id,
-                policy_key=DEFAULT_POLICY_KEY,
-                display_name=DEFAULT_POLICY_DISPLAY_NAME,
-                execution_mode="manual",
-            )
-
-        destination_rows = self.repository.list_action_destinations(self.profile_id)
-        description_destination_row = next(
-            (row for row in destination_rows if row["destination_key"] == DEFAULT_DESCRIPTION_DESTINATION_KEY),
-            None,
+        destination_id = self.repository.ensure_action_destination(
+            destination_id=f"{self.profile_id}-{DEFAULT_TRASH_DESTINATION_KEY}",
+            profile_id=self.profile_id,
+            destination_key=DEFAULT_TRASH_DESTINATION_KEY,
+            destination_type="trash",
+            immich_resource_id=DEFAULT_TRASH_DESTINATION_RESOURCE_ID,
         )
-        if description_destination_row is None:
-            description_destination_id = self.repository.ensure_action_destination(
-                destination_id=f"{self.profile_id}-asset-description",
-                profile_id=self.profile_id,
-                destination_key=DEFAULT_DESCRIPTION_DESTINATION_KEY,
-                destination_type="asset_description",
-                immich_resource_id=DEFAULT_DESCRIPTION_RESOURCE_ID,
-            )
-            description_destination_enabled = payload.get("updateDescription", self.update_description)
-        else:
-            description_destination_id = str(description_destination_row["id"])
-            description_destination_enabled = bool(description_destination_row["enabled"]) and bool(
-                payload.get("updateDescription", self.update_description)
-            )
-
-        review_album_resource_id = payload.get("reviewAlbumResourceId", self.review_album_resource_id)
-        review_album_destination_row = next(
-            (row for row in destination_rows if row["destination_key"] == DEFAULT_REVIEW_DESTINATION_KEY),
-            None,
-        )
-        review_album_destination_id = (
-            str(review_album_destination_row["id"])
-            if review_album_destination_row is not None and bool(review_album_destination_row["enabled"])
-            else None
-        )
-        if review_album_resource_id:
-            review_album_destination_id = self.repository.ensure_action_destination(
-                destination_id=f"{self.profile_id}-review-album",
-                profile_id=self.profile_id,
-                destination_key=DEFAULT_REVIEW_DESTINATION_KEY,
-                destination_type="album",
-                immich_resource_id=str(review_album_resource_id),
-            )
-
-        review_threshold = float(payload.get("reviewThreshold", self.review_threshold))
-
-        return ApplyConfig(
-            action_policy_id=action_policy_id,
-            review_album_destination_id=review_album_destination_id,
-            review_album_resource_id=str(review_album_resource_id) if review_album_resource_id else None,
-            description_destination_id=description_destination_id if description_destination_enabled else None,
-            review_threshold=review_threshold,
-        )
-
-    @staticmethod
-    def _parse_rescued_assets(raw_items: Iterable[dict[str, Any]] | Any) -> list[RescueFeedbackInput]:
-        if not isinstance(raw_items, Iterable) or isinstance(raw_items, (str, bytes, dict)):
-            return []
-
-        rescued_assets: list[RescueFeedbackInput] = []
-        for item in raw_items:
-            if not isinstance(item, dict) or not item.get("immichAssetId"):
-                continue
-            rescued_assets.append(
-                RescueFeedbackInput(
-                    immich_asset_id=str(item["immichAssetId"]),
-                    previous_score=float(item["previousScore"]) if item.get("previousScore") is not None else None,
-                    category_id=str(item["categoryId"]) if item.get("categoryId") else None,
-                    source_trace_id=str(item["sourceTraceId"]) if item.get("sourceTraceId") else None,
-                    sample_weight=float(item.get("sampleWeight", 0.5)),
-                    metadata=item.get("metadata") if isinstance(item.get("metadata"), dict) else None,
-                    note=str(item["note"]) if item.get("note") else None,
-                    occurred_at=str(item["occurredAt"]) if item.get("occurredAt") else None,
-                )
-            )
-        return rescued_assets
+        return action_policy_id, destination_id
 
 
 @dataclass(frozen=True)
@@ -383,10 +300,7 @@ class JobService:
                 result = handler(payload or {})
             except Exception as error:
                 status = "failed"
-                result = {
-                    "error": str(error),
-                    "errorType": type(error).__name__,
-                }
+                result = {"error": str(error), "errorType": type(error).__name__}
         job_run = JobRun(
             id=job_id,
             job_type=job_type,
@@ -442,13 +356,9 @@ def build_job_service(
             default_review_album_resource_id=review_album_resource_id,
             default_review_threshold=review_threshold,
         )
-        review_album_resource_id = runtime_settings.review_album_resource_id
-        review_threshold = runtime_settings.review_threshold
-        collect_batch_size = _load_collect_batch_size(repository, profile_id)
-        label_resolver_config = runtime_settings.label_resolver_config
-        label_resolver = LabelResolver(label_resolver_config)
-        feature_assembler = FeatureAssembler(label_resolver_config.known_category_keys)
-        collector = AssetDiffCollector(
+        label_resolver = LabelResolver(runtime_settings.label_resolver_config)
+        feature_assembler = FeatureAssembler(runtime_settings.label_resolver_config.known_category_keys)
+        signal_collector = ManualSignalCollector(
             repository,
             asset_client,
             profile_id=profile_id,
@@ -466,17 +376,16 @@ def build_job_service(
         runner = SmartRankerJobRunner(
             storage_paths=storage_paths,
             repository=repository,
-            collector=collector,
+            asset_client=asset_client,
+            signal_collector=signal_collector,
             feature_input_builder=feature_input_builder,
             label_resolver=label_resolver,
             training_job=training_job,
             inference_job=inference_job,
             profile_id=profile_id,
             immich_user_id=immich_user_id,
-            collect_batch_size=collect_batch_size,
-            review_album_resource_id=review_album_resource_id,
-            review_threshold=review_threshold,
-            update_description=runtime_settings.update_description,
+            batch_size=_load_learn_batch_size(repository, profile_id),
+            review_threshold=runtime_settings.review_threshold,
             now_factory=now_factory,
         )
         return JobService(handlers=runner.handlers(), now_factory=now_factory)
@@ -491,14 +400,11 @@ def _build_configuration_error_service(
     def handler(_: dict[str, Any]) -> dict[str, Any]:
         raise error
 
-    return JobService(
-        handlers={job_type: handler for job_type in JOB_TYPES},
-        now_factory=now_factory,
-    )
+    return JobService(handlers={job_type: handler for job_type in JOB_TYPES}, now_factory=now_factory)
 
 
-def _load_collect_batch_size(repository: StorageRepository, profile_id: str) -> int:
+def _load_learn_batch_size(repository: StorageRepository, profile_id: str) -> int:
     for row in repository.list_execution_schedules(profile_id):
-        if row["job_type"] == "collect":
+        if row["job_type"] in {"learn", "collect"}:
             return max(1, int(row["batch_size"]))
-    return DEFAULT_COLLECT_BATCH_SIZE
+    return DEFAULT_BATCH_SIZE

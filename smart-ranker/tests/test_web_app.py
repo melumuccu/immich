@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from smart_ranker.immich_client import ActionResult, AssetSnapshot, PersonSnapshot, SearchResult
+from smart_ranker.immich_client import ActionResult, AssetSnapshot, BinaryResponseEnvelope, PersonSnapshot, SearchResult
 from smart_ranker.master_data import load_runtime_settings
 from smart_ranker.storage import bootstrap_storage
 from smart_ranker.web.app import (
@@ -18,8 +18,11 @@ from smart_ranker.web.app import (
 )
 from smart_ranker.storage.repository import (
     ActionExecutionLogRecord,
+    ApplyExclusionAssetRecord,
     FeedbackEventRecord,
     InferenceTraceRecord,
+    ScoreResultRecord,
+    ScoreRunRecord,
     StorageRepository,
 )
 from smart_ranker.web.app import create_app
@@ -50,7 +53,7 @@ class FakeEmbeddingReader:
 
 class FakeActionClient:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, dict[str, object] | list[str]]] = []
+        self.calls: list[tuple[str, object, object]] = []
 
     def add_assets_to_album(self, album_id: str, asset_ids: list[str]) -> ActionResult:
         self.calls.append(("add_assets_to_album", album_id, asset_ids))
@@ -59,6 +62,10 @@ class FakeActionClient:
     def update_asset(self, asset_id: str, payload: dict[str, object]) -> ActionResult:
         self.calls.append(("update_asset", asset_id, payload))
         return ActionResult(status_code=200, ok=True, payload={"assetId": asset_id, **payload})
+
+    def trash_assets(self, asset_ids: list[str], *, force: bool = False) -> ActionResult:
+        self.calls.append(("trash_assets", list(asset_ids), {"force": force}))
+        return ActionResult(status_code=200, ok=True, payload={"ids": list(asset_ids), "force": force})
 
 
 class FakePeopleClient:
@@ -95,6 +102,27 @@ class FakePeopleClient:
                 payload={"id": "person-2"},
             )
         ]
+
+
+class FakeThumbnailAssetClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, str | None]] = []
+
+    def get_asset_thumbnail(
+        self,
+        asset_id: str,
+        *,
+        size: str | None = None,
+        format: str | None = None,
+    ) -> BinaryResponseEnvelope:
+        self.calls.append((asset_id, size, format))
+        return BinaryResponseEnvelope(
+            status_code=200,
+            payload=b"thumbnail-bytes",
+            content_type="image/webp",
+            cache_control="public, max-age=60",
+            etag='"thumb-1"',
+        )
 
 
 def make_asset(
@@ -142,16 +170,29 @@ class WebAppTest(unittest.TestCase):
 
             self.assertEqual(200, response.status_code)
 
-    def test_manual_job_api_runs_collect_train_score_and_apply(self) -> None:
+    def test_manual_job_api_runs_learn_score_and_apply(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             bootstrap_result = bootstrap_storage(state_dir=Path(temp_dir) / "state")
             repository = StorageRepository(bootstrap_result.paths.db_path)
             asset_client = FakeAssetClient(
                 [
                     SearchResult(
+                        items=[make_asset(asset_id="person-positive", favorite=True, people=("person-1",))],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                    SearchResult(
+                        items=[make_asset(asset_id="person-negative", trashed=True, people=("person-1",))],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                    SearchResult(
                         items=[
                             make_asset(asset_id="person-positive", favorite=True, people=("person-1",)),
                             make_asset(asset_id="person-negative", trashed=True, people=("person-1",)),
+                            make_asset(asset_id="neutral-low"),
                         ],
                         next_page=None,
                         has_next_page=False,
@@ -170,11 +211,12 @@ class WebAppTest(unittest.TestCase):
                     {
                         "person-positive": [2.0, 1.5],
                         "person-negative": [-2.0, -1.5],
+                        "neutral-low": [-1.8, -1.4],
                     }
                 ),
                 action_client=action_client,
                 review_album_resource_id="album-1",
-                review_threshold=1.1,
+                review_threshold=0.5,
                 now_factory=lambda: "2026-05-09T12:00:00Z",
             )
             app = create_app(
@@ -184,56 +226,57 @@ class WebAppTest(unittest.TestCase):
             )
             client = TestClient(app)
 
-            collect_response = client.post("/api/jobs/collect", json={"trigger": "test"})
-            train_response = client.post("/api/jobs/train", json={"trigger": "test"})
+            learn_response = client.post("/api/jobs/learn", json={"trigger": "test"})
             score_response = client.post("/api/jobs/score", json={"trigger": "test"})
             apply_response = client.post("/api/jobs/apply", json={"trigger": "test"})
 
-            self.assertEqual(202, collect_response.status_code)
-            self.assertEqual(202, train_response.status_code)
+            self.assertEqual(202, learn_response.status_code)
             self.assertEqual(202, score_response.status_code)
             self.assertEqual(202, apply_response.status_code)
 
-            collect_payload = collect_response.json()
-            train_payload = train_response.json()
+            learn_payload = learn_response.json()
             score_payload = score_response.json()
             apply_payload = apply_response.json()
 
-            collect_status = client.get(f"/api/jobs/{collect_payload['jobRunId']}").json()
-            train_status = client.get(f"/api/jobs/{train_payload['jobRunId']}").json()
+            learn_status = client.get(f"/api/jobs/{learn_payload['jobRunId']}").json()
             score_status = client.get(f"/api/jobs/{score_payload['jobRunId']}").json()
             apply_status = client.get(f"/api/jobs/{apply_payload['jobRunId']}").json()
 
-            self.assertEqual("completed", collect_status["status"])
-            self.assertEqual(2, collect_status["result"]["assetCount"])
-            self.assertEqual(2, collect_status["result"]["featureInputCount"])
-
-            self.assertEqual("completed", train_status["status"])
-            self.assertIn("generic", train_status["result"]["modelKeys"])
-            self.assertIn("person", train_status["result"]["modelKeys"])
+            self.assertEqual("completed", learn_status["status"])
+            self.assertEqual(1, learn_status["result"]["favoriteSignalCount"])
+            self.assertEqual(1, learn_status["result"]["trashSignalCount"])
+            self.assertEqual(2, learn_status["result"]["trainingAssetCount"])
+            self.assertIn("generic", learn_status["result"]["modelKeys"])
+            self.assertIn("person", learn_status["result"]["modelKeys"])
 
             self.assertEqual("completed", score_status["status"])
-            self.assertTrue(score_status["result"]["dryRun"])
-            self.assertEqual(1, score_status["result"]["traceCount"])
+            self.assertEqual(3, score_status["result"]["scoredAssetCount"])
+            self.assertIn("scoreRunId", score_status["result"])
 
             self.assertEqual("completed", apply_status["status"])
             self.assertFalse(apply_status["result"]["dryRun"])
-            self.assertEqual(1, apply_status["result"]["traceCount"])
-            self.assertEqual(2, len(action_client.calls))
+            self.assertEqual(1, apply_status["result"]["appliedCount"])
+            self.assertEqual(["neutral-low"], apply_status["result"]["assetIds"])
+            self.assertEqual(1, len(action_client.calls))
+            self.assertEqual("trash_assets", action_client.calls[0][0])
 
             ledger = client.get("/api/event-ledger").json()
-            self.assertEqual(2, len(ledger["inferenceTraces"]))
-            self.assertEqual(4, len(ledger["actionExecutionLogs"]))
+            self.assertEqual(1, len(ledger["favoriteSignals"]))
+            self.assertEqual(1, len(ledger["trashSignals"]))
+            self.assertEqual(1, len(ledger["scoreRuns"]))
+            self.assertEqual(3, len(ledger["scoreResults"]))
+            self.assertEqual(1, len(ledger["actionExecutionLogs"]))
+            self.assertEqual(1, len(ledger["applyExclusionAssets"]))
 
-    def test_manual_collect_uses_schedule_batch_size_and_reports_pending_pages(self) -> None:
+    def test_manual_learn_uses_schedule_batch_size_for_signal_sync(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             bootstrap_result = bootstrap_storage(state_dir=Path(temp_dir) / "state")
             repository = StorageRepository(bootstrap_result.paths.db_path)
             repository.insert_profile(profile_id="profile-1", immich_user_id="immich-user-1")
             repository.upsert_execution_schedule(
-                schedule_id="schedule-collect",
+                schedule_id="schedule-learn",
                 profile_id="profile-1",
-                job_type="collect",
+                job_type="learn",
                 run_mode="manual",
                 cron_expr=None,
                 dry_run=False,
@@ -244,8 +287,8 @@ class WebAppTest(unittest.TestCase):
                 [
                     SearchResult(
                         items=[make_asset(asset_id="person-positive", favorite=True, people=("person-1",))],
-                        next_page="2",
-                        has_next_page=True,
+                        next_page=None,
+                        has_next_page=False,
                         raw={},
                     ),
                     SearchResult(
@@ -280,21 +323,14 @@ class WebAppTest(unittest.TestCase):
             )
             client = TestClient(app)
 
-            first_response = client.post("/api/jobs/collect", json={"trigger": "test"})
-            first_status = client.get(f"/api/jobs/{first_response.json()['jobRunId']}").json()
+            response = client.post("/api/jobs/learn", json={"trigger": "test"})
+            status_payload = client.get(f"/api/jobs/{response.json()['jobRunId']}").json()
 
-            self.assertEqual(1, first_status["result"]["assetCount"])
-            self.assertEqual(1, first_status["result"]["featureInputCount"])
-            self.assertEqual(1, first_status["result"]["batchSize"])
-            self.assertTrue(first_status["result"]["hasMore"])
-
-            second_response = client.post("/api/jobs/collect", json={"trigger": "test"})
-            second_status = client.get(f"/api/jobs/{second_response.json()['jobRunId']}").json()
-
-            self.assertEqual(1, second_status["result"]["assetCount"])
-            self.assertEqual(1, second_status["result"]["featureInputCount"])
-            self.assertEqual(1, second_status["result"]["batchSize"])
-            self.assertFalse(second_status["result"]["hasMore"])
+            self.assertEqual(1, status_payload["result"]["batchSize"])
+            self.assertEqual(1, status_payload["result"]["favoriteSignalCount"])
+            self.assertEqual(1, status_payload["result"]["trashSignalCount"])
+            self.assertEqual({"isFavorite": True, "size": 1, "page": 1}, asset_client.search_metadata_calls[0])
+            self.assertEqual({"isTrashed": True, "size": 1, "page": 1}, asset_client.search_metadata_calls[1])
 
     def test_manual_job_api_reports_configuration_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -311,11 +347,11 @@ class WebAppTest(unittest.TestCase):
                 app = create_app(state_dir=Path(temp_dir) / "state", profile_id="profile-1")
                 client = TestClient(app)
 
-                response = client.post("/api/jobs/train", json={"trigger": "test"})
+                response = client.post("/api/jobs/learn", json={"trigger": "test"})
 
                 self.assertEqual(202, response.status_code)
                 payload = response.json()
-                self.assertEqual("train", payload["jobType"])
+                self.assertEqual("learn", payload["jobType"])
                 self.assertIn("jobRunId", payload)
 
                 status_response = client.get(f"/api/jobs/{payload['jobRunId']}")
@@ -403,6 +439,44 @@ class WebAppTest(unittest.TestCase):
                     executed_at="2026-05-09T12:02:00Z",
                 )
             )
+            repository.insert_score_run(
+                ScoreRunRecord(
+                    id="score-run-1",
+                    profile_id="profile-1",
+                    model_run_id="run-1",
+                    trigger_type="manual",
+                    status="completed",
+                    scope={"jobType": "score"},
+                    started_at="2026-05-09T12:01:30Z",
+                    completed_at="2026-05-09T12:01:45Z",
+                )
+            )
+            repository.insert_score_results(
+                [
+                    ScoreResultRecord(
+                        id="score-result-1",
+                        score_run_id="score-run-1",
+                        profile_id="profile-1",
+                        immich_asset_id="asset-1",
+                        total_score=0.31,
+                        rank_index=1,
+                        category_scores={"generic": 0.31},
+                        current_state={"isTrashed": False, "traceId": "trace-1"},
+                        scored_at="2026-05-09T12:01:45Z",
+                    )
+                ]
+            )
+            repository.insert_apply_exclusion_asset(
+                ApplyExclusionAssetRecord(
+                    id="exclude-1",
+                    profile_id="profile-1",
+                    immich_asset_id="asset-1",
+                    score_run_id="score-run-1",
+                    action_log_id="log-1",
+                    reason="auto-trash",
+                    excluded_at="2026-05-09T12:02:00Z",
+                )
+            )
 
             snapshot_path = bootstrap_result.paths.snapshots_dir / "train-run-1.json"
             snapshot_path.write_text(
@@ -421,12 +495,16 @@ class WebAppTest(unittest.TestCase):
 
             html = client.get("/")
             settings_html = client.get("/settings")
+            score_review_html = client.get("/score-review")
             self.assertEqual(200, html.status_code)
             self.assertEqual(200, settings_html.status_code)
+            self.assertEqual(200, score_review_html.status_code)
             self.assertIn("Person Group", html.text)
             self.assertIn("Event Ledger", html.text)
+            self.assertIn("score review", html.text)
             self.assertIn("settings", html.text)
             self.assertIn("Person Group", settings_html.text)
+            self.assertIn("score review", score_review_html.text)
 
             person_groups = client.get("/api/person-groups").json()
             categories = client.get("/api/categories").json()
@@ -441,6 +519,84 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(1, len(ledger["feedbackEvents"]))
             self.assertEqual(1, len(ledger["inferenceTraces"]))
             self.assertEqual(1, len(ledger["actionExecutionLogs"]))
+            self.assertEqual(1, len(ledger["scoreRuns"]))
+            self.assertEqual(1, len(ledger["scoreResults"]))
+            self.assertEqual(1, len(ledger["applyExclusionAssets"]))
+
+    def test_score_review_api_paginates_and_thumbnail_proxy_uses_injected_client(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_dir = Path(temp_dir) / "state"
+            bootstrap_result = bootstrap_storage(state_dir=state_dir)
+            repository = StorageRepository(bootstrap_result.paths.db_path)
+            repository.insert_profile(profile_id="profile-1", immich_user_id="immich-user-1")
+            repository.insert_score_run(
+                ScoreRunRecord(
+                    id="score-run-1",
+                    profile_id="profile-1",
+                    model_run_id="run-1",
+                    trigger_type="manual",
+                    status="completed",
+                    scope={"jobType": "score"},
+                    started_at="2026-05-09T12:01:30Z",
+                    completed_at="2026-05-09T12:01:45Z",
+                )
+            )
+            repository.insert_score_results(
+                [
+                    ScoreResultRecord(
+                        id=f"score-result-{index:03d}",
+                        score_run_id="score-run-1",
+                        profile_id="profile-1",
+                        immich_asset_id=f"asset-{index:03d}",
+                        total_score=index / 1000,
+                        rank_index=index,
+                        category_scores={"generic": index / 1000},
+                        current_state={
+                            "originalFileName": f"IMG_{index:03d}.JPG",
+                            "originalPath": f"/library/2026/IMG_{index:03d}.JPG",
+                            "isFavorite": index % 2 == 0,
+                            "isTrashed": False,
+                        },
+                        scored_at="2026-05-09T12:01:45Z",
+                    )
+                    for index in range(1, 106)
+                ]
+            )
+
+            app = create_app(state_dir=state_dir, profile_id="profile-1")
+            thumbnail_client = FakeThumbnailAssetClient()
+            app.state.asset_client = thumbnail_client
+            client = TestClient(app)
+
+            html = client.get("/score-review")
+            page_one = client.get("/api/score-review")
+            page_two = client.get("/api/score-review", params={"page": 2, "scoreRunId": "score-run-1"})
+            thumbnail = client.get("/api/assets/asset-010/thumbnail")
+
+            self.assertEqual(200, html.status_code)
+            self.assertIn("score review", html.text)
+
+            self.assertEqual(200, page_one.status_code)
+            page_one_payload = page_one.json()
+            self.assertEqual("score-run-1", page_one_payload["scoreRunId"])
+            self.assertEqual(100, page_one_payload["pageSize"])
+            self.assertEqual(105, page_one_payload["totalItems"])
+            self.assertEqual(2, page_one_payload["totalPages"])
+            self.assertEqual(100, len(page_one_payload["items"]))
+            self.assertEqual("asset-001", page_one_payload["items"][0]["immichAssetId"])
+            self.assertEqual("/api/assets/asset-001/thumbnail", page_one_payload["items"][0]["thumbnailUrl"])
+
+            self.assertEqual(200, page_two.status_code)
+            page_two_payload = page_two.json()
+            self.assertEqual(2, page_two_payload["page"])
+            self.assertEqual(5, len(page_two_payload["items"]))
+            self.assertEqual("asset-101", page_two_payload["items"][0]["immichAssetId"])
+
+            self.assertEqual(200, thumbnail.status_code)
+            self.assertEqual(b"thumbnail-bytes", thumbnail.content)
+            self.assertEqual("image/webp", thumbnail.headers["content-type"])
+            self.assertEqual("public, max-age=60", thumbnail.headers["cache-control"])
+            self.assertEqual([("asset-010", None, None)], thumbnail_client.calls)
 
     def test_jobs_models_endpoint_includes_runtime_reset_token(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -540,7 +696,7 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(2, len(seed_payload["personGroups"]))
             self.assertEqual(8, len(seed_payload["categories"]))
             self.assertEqual(9, len(seed_payload["routingRules"]))
-            self.assertEqual(4, len(seed_payload["schedules"]))
+            self.assertEqual(3, len(seed_payload["schedules"]))
 
             groups_payload = client.get("/api/settings/person-groups").json()
             groups_payload["personGroups"][0]["members"] = [
@@ -559,7 +715,7 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(200, policies_response.status_code)
 
             jobs_models = client.get("/api/settings/jobs-models").json()
-            self.assertEqual(4, len(jobs_models["schedules"]))
+            self.assertEqual(3, len(jobs_models["schedules"]))
 
             runtime_settings = load_runtime_settings(repository, profile_id="profile-1")
             self.assertEqual(0.33, runtime_settings.review_threshold)

@@ -26,7 +26,7 @@ set +a
 """
 
 [tasks.reset-runtime-data]
-description = "collect/train/score/apply の実行データを消し、設定データは保持したまま初期状態へ戻す"
+description = "learn/score/apply の実行データを消し、設定データは保持したまま初期状態へ戻す"
 run = """
 ./.venv/bin/python -m smart_ranker reset-runtime-data --state-dir ./var/local
 """
@@ -85,29 +85,16 @@ run = """
 ./.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
 """
 
-[tasks.collect]
-description = "ローカルの Smart Ranker API から collect ジョブを実行する"
+[tasks.learn]
+description = "ローカルの Smart Ranker API から learn ジョブを実行する"
 run = """
 set -eu
 set -a
 . ../.env
 set +a
-curl -s -X POST http://127.0.0.1:${SMART_RANKER_PORT:-8010}/api/jobs/collect \
+curl -s -X POST http://127.0.0.1:${SMART_RANKER_PORT:-8010}/api/jobs/learn \
   -H 'content-type: application/json' \
-  -d '{"trigger":"mise-collect"}'
-echo
-"""
-
-[tasks.train]
-description = "ローカルの Smart Ranker API から train ジョブを実行する"
-run = """
-set -eu
-set -a
-. ../.env
-set +a
-curl -s -X POST http://127.0.0.1:${SMART_RANKER_PORT:-8010}/api/jobs/train \
-  -H 'content-type: application/json' \
-  -d '{"trigger":"mise-train"}'
+  -d '{"trigger":"mise-learn"}'
 echo
 """
 

@@ -5,12 +5,13 @@ from smart_ranker.immich_client.client import (
     PeopleClient,
 )
 from smart_ranker.immich_client.dto import ActionResult, AssetSnapshot, PersonSnapshot, SearchResult
-from smart_ranker.immich_client.session import ImmichHttpError, ImmichSession
+from smart_ranker.immich_client.session import BinaryResponseEnvelope, ImmichHttpError, ImmichSession
 
 __all__ = [
     "ActionResult",
     "AssetReadClient",
     "AssetSnapshot",
+    "BinaryResponseEnvelope",
     "CapabilityRegistry",
     "ImmichHttpError",
     "ImmichSession",

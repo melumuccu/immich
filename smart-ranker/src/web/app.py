@@ -6,11 +6,11 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from smart_ranker.immich_client import ImmichHttpError, ImmichSession, PeopleClient
+from smart_ranker.immich_client import AssetReadClient, ImmichHttpError, ImmichSession, PeopleClient
 from smart_ranker.master_data import (
     load_master_data,
     resolve_seed_inputs,
@@ -71,6 +71,7 @@ def create_app(
     app.state.profile_id = profile_id
     app.state.auto_rebuild_job_service = job_service is None
     app.state.people_client = people_client
+    app.state.asset_client = None
     app.state.job_service = job_service or build_job_service(
         storage_paths=bootstrap_result.paths,
         repository=repository,
@@ -98,6 +99,10 @@ def create_app(
 
     @app.get("/settings")
     def settings() -> FileResponse:
+        return _render_console()
+
+    @app.get("/score-review")
+    def score_review() -> FileResponse:
         return _render_console()
 
     def _build_live_reload_token() -> str:
@@ -193,9 +198,39 @@ def create_app(
         )
         return app.state.people_client
 
+    def _get_asset_client() -> AssetReadClient:
+        existing_client = app.state.asset_client
+        if existing_client is not None:
+            return existing_client
+
+        try:
+            runtime_config = JobRuntimeConfig.from_env()
+        except JobConfigurationError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+        app.state.asset_client = AssetReadClient(
+            ImmichSession(runtime_config.immich_base_url, runtime_config.immich_api_key)
+        )
+        return app.state.asset_client
+
+    def _serialize_score_result_row(row) -> dict:
+        category_scores = json.loads(row["category_scores_json"] or "{}")
+        current_state = json.loads(row["current_state_json"] or "{}")
+        asset_id = str(row["immich_asset_id"])
+        return {
+            "id": row["id"],
+            "scoreRunId": row["score_run_id"],
+            "immichAssetId": asset_id,
+            "totalScore": float(row["total_score"]),
+            "rankIndex": int(row["rank_index"]),
+            "categoryScores": category_scores,
+            "currentState": current_state,
+            "thumbnailUrl": f"/api/assets/{asset_id}/thumbnail",
+        }
+
     @app.post("/api/jobs/{job_type}")
     def submit_job(job_type: str, payload: dict | None = None) -> JSONResponse:
-        if job_type not in {"collect", "train", "score", "apply"}:
+        if job_type not in {"learn", "score", "apply"}:
             raise HTTPException(status_code=404, detail="Unknown job type")
         job_run = app.state.job_service.submit(job_type, payload)
         return JSONResponse(
@@ -271,6 +306,81 @@ def create_app(
                 }
                 for person in people[:normalized_limit]
             ]
+        }
+
+    @app.get("/api/assets/{asset_id}/thumbnail")
+    def get_asset_thumbnail(asset_id: str) -> Response:
+        asset_client = _get_asset_client()
+        try:
+            thumbnail = asset_client.get_asset_thumbnail(asset_id)
+        except ImmichHttpError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+        headers = {}
+        if thumbnail.cache_control:
+            headers["Cache-Control"] = thumbnail.cache_control
+        if thumbnail.etag:
+            headers["ETag"] = thumbnail.etag
+        return Response(
+            content=thumbnail.payload,
+            media_type=thumbnail.content_type or "image/jpeg",
+            headers=headers,
+        )
+
+    @app.get("/api/score-review")
+    def get_score_review(
+        page: int = 1,
+        page_size: int = Query(100, alias="pageSize"),
+        score_run_id: str | None = Query(None, alias="scoreRunId"),
+    ) -> dict:
+        normalized_page_size = min(max(1, int(page_size)), 100)
+        requested_page = max(1, int(page))
+
+        selected_score_run = (
+            app.state.repository.get_score_run(app.state.profile_id, score_run_id)
+            if score_run_id
+            else app.state.repository.get_latest_completed_score_run(app.state.profile_id)
+        )
+        if selected_score_run is None:
+            return {
+                "scoreRunId": None,
+                "page": 1,
+                "pageSize": normalized_page_size,
+                "totalItems": 0,
+                "totalPages": 0,
+                "items": [],
+            }
+
+        resolved_score_run_id = str(selected_score_run["id"])
+        total_items = app.state.repository.count_score_results(
+            app.state.profile_id,
+            score_run_id=resolved_score_run_id,
+        )
+        total_pages = (total_items + normalized_page_size - 1) // normalized_page_size if total_items else 0
+        resolved_page = min(requested_page, total_pages) if total_pages else 1
+        offset = max(0, (resolved_page - 1) * normalized_page_size)
+        rows = app.state.repository.list_score_results_page(
+            app.state.profile_id,
+            score_run_id=resolved_score_run_id,
+            limit=normalized_page_size,
+            offset=offset,
+        )
+
+        return {
+            "scoreRunId": resolved_score_run_id,
+            "page": resolved_page,
+            "pageSize": normalized_page_size,
+            "totalItems": total_items,
+            "totalPages": total_pages,
+            "items": [_serialize_score_result_row(row) for row in rows],
+            "scoreRun": {
+                "id": selected_score_run["id"],
+                "modelRunId": selected_score_run["model_run_id"],
+                "triggerType": selected_score_run["trigger_type"],
+                "status": selected_score_run["status"],
+                "startedAt": selected_score_run["started_at"],
+                "completedAt": selected_score_run["completed_at"],
+            },
         }
 
     @app.get("/api/settings/person-groups")
@@ -388,10 +498,25 @@ def create_app(
         feedback_rows = app.state.repository.list_feedback_events(app.state.profile_id)
         trace_rows = app.state.repository.list_inference_traces(app.state.profile_id)
         action_rows = app.state.repository.list_action_execution_logs(app.state.profile_id)
+        favorite_signal_rows = app.state.repository.list_favorite_signals(app.state.profile_id)
+        trash_signal_rows = app.state.repository.list_trash_signals(app.state.profile_id)
+        score_run_rows = app.state.repository.list_score_runs(app.state.profile_id)
+        latest_score_run = app.state.repository.get_latest_completed_score_run(app.state.profile_id)
+        score_result_rows = (
+            app.state.repository.list_score_results(app.state.profile_id, score_run_id=str(latest_score_run["id"]))
+            if latest_score_run is not None
+            else []
+        )
+        exclusion_rows = app.state.repository.list_apply_exclusion_assets(app.state.profile_id)
         return {
             "feedbackEvents": [dict(row) for row in feedback_rows],
             "inferenceTraces": [dict(row) for row in trace_rows],
             "actionExecutionLogs": [dict(row) for row in action_rows],
+            "favoriteSignals": [dict(row) for row in favorite_signal_rows],
+            "trashSignals": [dict(row) for row in trash_signal_rows],
+            "scoreRuns": [dict(row) for row in score_run_rows],
+            "scoreResults": [dict(row) for row in score_result_rows],
+            "applyExclusionAssets": [dict(row) for row in exclusion_rows],
         }
 
     return app

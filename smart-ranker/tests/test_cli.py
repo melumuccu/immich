@@ -11,10 +11,15 @@ from smart_ranker.master_data import seed_master_data
 from smart_ranker.storage import bootstrap_storage
 from smart_ranker.storage.repository import (
     ActionExecutionLogRecord,
+    ApplyExclusionAssetRecord,
     CollectorCursorRecord,
+    FavoriteSignalRecord,
     FeedbackEventRecord,
     InferenceTraceRecord,
+    ScoreResultRecord,
+    ScoreRunRecord,
     StorageRepository,
+    TrashSignalRecord,
 )
 
 
@@ -102,6 +107,66 @@ class CliTest(unittest.TestCase):
                     executed_at="2026-05-10T00:00:03Z",
                 )
             )
+            repository.upsert_favorite_signal(
+                FavoriteSignalRecord(
+                    id="favorite-1",
+                    profile_id="profile-1",
+                    immich_asset_id="asset-favorite",
+                    first_seen_at="2026-05-10T00:00:00Z",
+                    last_seen_at="2026-05-10T00:00:00Z",
+                    cleared_at=None,
+                    metadata={"id": "asset-favorite"},
+                )
+            )
+            repository.upsert_trash_signal(
+                TrashSignalRecord(
+                    id="trash-1",
+                    profile_id="profile-1",
+                    immich_asset_id="asset-trash",
+                    first_seen_at="2026-05-10T00:00:00Z",
+                    last_seen_at="2026-05-10T00:00:00Z",
+                    restored_at=None,
+                    metadata={"id": "asset-trash"},
+                )
+            )
+            repository.insert_score_run(
+                ScoreRunRecord(
+                    id="score-run-1",
+                    profile_id="profile-1",
+                    model_run_id="run-1",
+                    trigger_type="manual",
+                    status="completed",
+                    scope={"jobType": "score"},
+                    started_at="2026-05-10T00:00:04Z",
+                    completed_at="2026-05-10T00:00:05Z",
+                )
+            )
+            repository.insert_score_results(
+                [
+                    ScoreResultRecord(
+                        id="score-result-1",
+                        score_run_id="score-run-1",
+                        profile_id="profile-1",
+                        immich_asset_id="asset-1",
+                        total_score=0.12,
+                        rank_index=1,
+                        category_scores={"generic": 0.12},
+                        current_state={"isTrashed": False},
+                        scored_at="2026-05-10T00:00:05Z",
+                    )
+                ]
+            )
+            repository.insert_apply_exclusion_asset(
+                ApplyExclusionAssetRecord(
+                    id="exclude-1",
+                    profile_id="profile-1",
+                    immich_asset_id="asset-1",
+                    score_run_id="score-run-1",
+                    action_log_id="action-1",
+                    reason="auto-trash",
+                    excluded_at="2026-05-10T00:00:06Z",
+                )
+            )
 
             model_dir = bootstrap_result.paths.models_dir / "run-1"
             model_dir.mkdir(parents=True, exist_ok=True)
@@ -124,6 +189,10 @@ class CliTest(unittest.TestCase):
             self.assertEqual([], repository.list_feedback_events("profile-1"))
             self.assertEqual([], repository.list_inference_traces("profile-1"))
             self.assertEqual([], repository.list_action_execution_logs("profile-1"))
+            self.assertEqual([], repository.list_favorite_signals("profile-1"))
+            self.assertEqual([], repository.list_trash_signals("profile-1"))
+            self.assertEqual([], repository.list_apply_exclusion_assets("profile-1"))
+            self.assertEqual([], repository.list_score_runs("profile-1"))
 
             self.assertEqual([], list(bootstrap_result.paths.models_dir.iterdir()))
             self.assertEqual([], list(bootstrap_result.paths.snapshots_dir.iterdir()))
@@ -136,6 +205,11 @@ class CliTest(unittest.TestCase):
             self.assertIn("deleted_feedback_event=1", stdout)
             self.assertIn("deleted_inference_trace=1", stdout)
             self.assertIn("deleted_action_execution_log=1", stdout)
+            self.assertIn("deleted_favorite_signal=1", stdout)
+            self.assertIn("deleted_trash_signal=1", stdout)
+            self.assertIn("deleted_apply_exclusion_asset=1", stdout)
+            self.assertIn("deleted_score_result=1", stdout)
+            self.assertIn("deleted_score_run=1", stdout)
             self.assertIn("cleared_models=1", stdout)
             self.assertIn("cleared_snapshots=1", stdout)
             self.assertIn("runtime_reset_token=", stdout)
