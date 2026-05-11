@@ -49,7 +49,7 @@ class ImmichDbReader:
         with connection.cursor() as cursor:
             cursor.execute(
                 '''
-                SELECT "assetId", "embedding"::text
+                SELECT "assetId"::text, "embedding"::text
                 FROM smart_search
                 WHERE "assetId" = ANY(%s)
                 ''',
@@ -57,7 +57,7 @@ class ImmichDbReader:
             )
             rows = cursor.fetchall()
 
-        return {asset_id: parse_embedding(embedding) for asset_id, embedding in rows}
+        return {str(asset_id): parse_embedding(embedding) for asset_id, embedding in rows}
 
     def _ensure_connection(self) -> psycopg.Connection:
         if self.connection is None:

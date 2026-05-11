@@ -301,7 +301,7 @@ def build_default_master_data(
                 "runMode": "manual",
                 "cronExpr": None,
                 "dryRun": False,
-                "batchSize": 100,
+                "batchSize": 1000,
                 "enabled": True,
             },
             {
@@ -309,7 +309,7 @@ def build_default_master_data(
                 "runMode": "manual",
                 "cronExpr": None,
                 "dryRun": False,
-                "batchSize": 100,
+                "batchSize": 1000,
                 "enabled": True,
             },
             {
@@ -317,7 +317,7 @@ def build_default_master_data(
                 "runMode": "manual",
                 "cronExpr": None,
                 "dryRun": True,
-                "batchSize": 100,
+                "batchSize": 1000,
                 "enabled": True,
             },
             {
@@ -325,7 +325,7 @@ def build_default_master_data(
                 "runMode": "manual",
                 "cronExpr": None,
                 "dryRun": False,
-                "batchSize": 100,
+                "batchSize": 1000,
                 "enabled": True,
             },
         ],
@@ -656,7 +656,7 @@ def save_schedules(
         job_type = _required_string(item, "jobType")
         run_mode = _string_value(item, "runMode", default="manual")
         cron_expr = item.get("cronExpr")
-        batch_size = _int_value(item.get("batchSize"), default=100)
+        batch_size = _int_value(item.get("batchSize"), default=1000)
         dry_run = _bool_value(item.get("dryRun"), default=(job_type == "score"))
         enabled = _bool_value(item.get("enabled"), default=True)
         schedule_id = repository.upsert_execution_schedule(

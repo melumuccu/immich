@@ -748,7 +748,7 @@ const defaultSchedules = () => ["collect", "train", "score", "apply"].map((jobTy
   runMode: "manual",
   cronExpr: null,
   dryRun: jobType === "score",
-  batchSize: 100,
+  batchSize: 1000,
   enabled: true,
 }));
 
@@ -1407,7 +1407,7 @@ const syncSchedulesStateFromDom = () => {
     runMode: card.querySelector('[data-field="runMode"]').value,
     cronExpr: card.querySelector('[data-field="cronExpr"]').value.trim() || null,
     dryRun: card.querySelector('[data-field="dryRun"]').checked,
-    batchSize: Number(card.querySelector('[data-field="batchSize"]').value) || 100,
+    batchSize: Number(card.querySelector('[data-field="batchSize"]').value) || 1000,
     enabled: card.querySelector('[data-field="enabled"]').checked,
   }));
 };

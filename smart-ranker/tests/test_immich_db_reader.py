@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from uuid import UUID
 from unittest.mock import patch
 
 from smart_ranker.immich_db_reader import ImmichDbConfig, ImmichDbReader, parse_embedding
@@ -63,15 +64,16 @@ class ImmichDbReaderTest(unittest.TestCase):
         self.assertEqual((['asset-1'],), params)
 
     def test_fetch_embeddings_uses_read_only_query_shape(self) -> None:
-        fake_connection = FakeConnection(rows=[("asset-1", "[0.1, 0.2, 0.3]")])
+        fake_connection = FakeConnection(rows=[(UUID("11111111-1111-1111-1111-111111111111"), "[0.1, 0.2, 0.3]")])
         reader = ImmichDbReader(ImmichDbConfig(dsn="postgresql://ignored"), connection=fake_connection)
 
         result = reader.fetch_embeddings(["asset-1"])
 
-        self.assertEqual({"asset-1": [0.1, 0.2, 0.3]}, result)
+        self.assertEqual({"11111111-1111-1111-1111-111111111111": [0.1, 0.2, 0.3]}, result)
         self.assertEqual(1, len(fake_connection.cursors))
         query, params = fake_connection.cursors[0].executed[0]
         self.assertIn('FROM smart_search', query)
+        self.assertIn('SELECT "assetId"::text', query)
         self.assertIn('"assetId" = ANY(%s)', query)
         self.assertEqual((['asset-1'],), params)
 
