@@ -149,7 +149,7 @@ class InitialRunTest(unittest.TestCase):
                 asset_client.calls[0],
             )
             self.assertEqual(
-                {"isTrashed": True, "size": 1000, "page": 1},
+                {"withDeleted": True, "trashedAfter": "1970-01-01T00:00:00Z", "size": 1000, "page": 1},
                 asset_client.calls[1],
             )
             self.assertEqual(

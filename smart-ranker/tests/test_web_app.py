@@ -330,7 +330,10 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(1, status_payload["result"]["favoriteSignalCount"])
             self.assertEqual(1, status_payload["result"]["trashSignalCount"])
             self.assertEqual({"isFavorite": True, "size": 1, "page": 1}, asset_client.search_metadata_calls[0])
-            self.assertEqual({"isTrashed": True, "size": 1, "page": 1}, asset_client.search_metadata_calls[1])
+            self.assertEqual(
+                {"withDeleted": True, "trashedAfter": "1970-01-01T00:00:00Z", "size": 1, "page": 1},
+                asset_client.search_metadata_calls[1],
+            )
 
     def test_manual_job_api_reports_configuration_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

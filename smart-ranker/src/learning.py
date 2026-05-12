@@ -13,6 +13,12 @@ from smart_ranker.storage.repository import (
 )
 
 
+TRASH_SEARCH_PAYLOAD = {
+    "withDeleted": True,
+    "trashedAfter": "1970-01-01T00:00:00Z",
+}
+
+
 def fetch_assets_by_search(
     asset_client: Any,
     *,
@@ -79,7 +85,7 @@ class ManualSignalCollector:
         )
         trash_assets = fetch_assets_by_search(
             self.asset_client,
-            base_payload={"isTrashed": True},
+            base_payload=TRASH_SEARCH_PAYLOAD,
             batch_size=batch_size,
             max_assets=max_assets,
         )
