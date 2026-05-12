@@ -9,6 +9,7 @@ const JOB_HISTORY_STORAGE_KEY = "smart-ranker-job-history";
 const RUNTIME_RESET_TOKEN_STORAGE_KEY = "smart-ranker-runtime-reset-token";
 const MAX_JOB_HISTORY = 12;
 const SCORE_REVIEW_PAGE_SIZE = 100;
+const DEFAULT_SCORE_REVIEW_SORT_ORDER = "asc";
 
 const normalizeRoute = (path) => {
   const normalized = String(path ?? "/").replace(/\/+$/, "") || "/";
@@ -134,6 +135,7 @@ const state = {
       items: [],
       page: 1,
       pageSize: SCORE_REVIEW_PAGE_SIZE,
+      sortOrder: DEFAULT_SCORE_REVIEW_SORT_ORDER,
       totalItems: 0,
       totalPages: 0,
       scoreRunId: null,
@@ -363,10 +365,28 @@ const formatScore = (value) => {
   return Number.isFinite(numeric) ? numeric.toFixed(2) : "n/a";
 };
 
+const normalizeScoreReviewSortOrder = (value) => (String(value ?? "").toLowerCase() === "desc"
+  ? "desc"
+  : DEFAULT_SCORE_REVIEW_SORT_ORDER);
+
+const formatScoreReviewSortLabel = (sortOrder) => (normalizeScoreReviewSortOrder(sortOrder) === "desc"
+  ? "score high -> low"
+  : "score low -> high");
+
+const resolveScoreReviewTargetPage = (value, totalPages = state.ui.scoreReview.totalPages) => {
+  const normalized = String(value ?? "").trim();
+  const maxPage = Math.max(1, Number(totalPages) || 1);
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+  return Math.min(maxPage, Math.max(1, Number(normalized)));
+};
+
 const buildScoreReviewRequestUrl = (page = state.ui.scoreReview.page) => {
   const params = new URLSearchParams({
     page: String(Math.max(1, Number(page) || 1)),
     pageSize: String(state.ui.scoreReview.pageSize || SCORE_REVIEW_PAGE_SIZE),
+    sortOrder: normalizeScoreReviewSortOrder(state.ui.scoreReview.sortOrder),
   });
   if (state.ui.scoreReview.scoreRunId) {
     params.set("scoreRunId", state.ui.scoreReview.scoreRunId);
@@ -379,11 +399,28 @@ const applyScoreReviewPayload = (payload) => {
     items: Array.isArray(payload?.items) ? payload.items : [],
     page: Math.max(1, Number(payload?.page) || 1),
     pageSize: Math.max(1, Number(payload?.pageSize) || SCORE_REVIEW_PAGE_SIZE),
+    sortOrder: normalizeScoreReviewSortOrder(payload?.sortOrder),
     totalItems: Math.max(0, Number(payload?.totalItems) || 0),
     totalPages: Math.max(0, Number(payload?.totalPages) || 0),
     scoreRunId: payload?.scoreRunId ? String(payload.scoreRunId) : null,
     scoreRun: payload?.scoreRun ?? null,
   };
+};
+
+const renderScoreReviewStatus = () => {
+  setStatus(
+    "score-review-status",
+    state.ui.scoreReview.totalItems
+      ? `showing ${formatScoreReviewRange()}`
+      : "score result not available yet",
+  );
+};
+
+const reloadScoreReviewPage = async (page) => {
+  setStatus("score-review-status", "loading score review...");
+  await loadScoreReviewPage(page);
+  renderAll();
+  renderScoreReviewStatus();
 };
 
 const formatScoreReviewRange = () => {
@@ -1227,6 +1264,7 @@ const renderScoreReviewPage = () => {
 
   const scoreReview = state.ui.scoreReview;
   const items = scoreReview.items ?? [];
+  const sortOrder = normalizeScoreReviewSortOrder(scoreReview.sortOrder);
   if (!scoreReview.scoreRunId) {
     container.innerHTML = `
       <article class="panel score-review-empty">
@@ -1239,6 +1277,7 @@ const renderScoreReviewPage = () => {
   }
 
   const scoreRun = scoreReview.scoreRun ?? {};
+  const totalPages = Math.max(1, Number(scoreReview.totalPages) || 1);
   const cardsHtml = items.length
     ? items.map((item) => {
       const currentState = item.currentState ?? {};
@@ -1259,13 +1298,15 @@ const renderScoreReviewPage = () => {
       }
       return `
         <article class="panel score-review-card">
-          <img
-            class="score-review-thumb"
-            src="${escapeHtml(item.thumbnailUrl)}"
-            alt="${escapeHtml(originalFileName)} thumbnail"
-            loading="lazy"
-            referrerpolicy="same-origin"
-          >
+          <div class="score-review-card-media">
+            <img
+              class="score-review-thumb"
+              src="${escapeHtml(item.thumbnailUrl)}"
+              alt="${escapeHtml(originalFileName)} thumbnail"
+              loading="lazy"
+              referrerpolicy="same-origin"
+            >
+          </div>
           <div class="score-review-card-body">
             <div class="score-review-card-head">
               <span class="token">#${formatCount(item.rankIndex)}</span>
@@ -1298,11 +1339,34 @@ const renderScoreReviewPage = () => {
       <div class="score-review-toolbar">
         <div>
           <h1>Scored assets ordered for review.</h1>
-          <p class="lede">score の結果を rank 順に 100 件ずつ確認します。thumbnail は Immich API を backend 経由で取得します。</p>
+          <p class="lede">score の結果をカードで 100 件ずつ確認します。thumbnail は Immich API を backend 経由で取得します。</p>
         </div>
-        <div class="score-review-pager">
-          <button type="button" class="button-secondary" data-action="score-review-prev" ${scoreReview.page <= 1 ? "disabled" : ""}>prev 100</button>
-          <button type="button" class="button-secondary" data-action="score-review-next" ${scoreReview.totalPages === 0 || scoreReview.page >= scoreReview.totalPages ? "disabled" : ""}>next 100</button>
+        <div class="score-review-toolbar-actions">
+          <div class="score-review-sorter" role="group" aria-label="Score review sort order">
+            <button type="button" class="button-secondary score-review-sort-button" data-action="score-review-sort" data-sort-order="asc" aria-pressed="${sortOrder === "asc"}">score low -&gt; high</button>
+            <button type="button" class="button-secondary score-review-sort-button" data-action="score-review-sort" data-sort-order="desc" aria-pressed="${sortOrder === "desc"}">score high -&gt; low</button>
+          </div>
+          <div class="score-review-pager">
+            <button type="button" class="button-secondary" data-action="score-review-prev" ${scoreReview.page <= 1 ? "disabled" : ""}>prev 100</button>
+            <form class="score-review-page-jump" data-role="score-review-page-jump">
+              <label class="score-review-page-field">
+                <span>page</span>
+                <input
+                  class="score-review-page-input"
+                  type="number"
+                  min="1"
+                  max="${totalPages}"
+                  step="1"
+                  inputmode="numeric"
+                  value="${scoreReview.page}"
+                  data-role="score-review-page-input"
+                  ${scoreReview.totalPages === 0 ? "disabled" : ""}
+                >
+              </label>
+              <button type="submit" class="button-secondary" ${scoreReview.totalPages === 0 ? "disabled" : ""}>go</button>
+            </form>
+            <button type="button" class="button-secondary" data-action="score-review-next" ${scoreReview.totalPages === 0 || scoreReview.page >= scoreReview.totalPages ? "disabled" : ""}>next 100</button>
+          </div>
         </div>
       </div>
       <div class="score-review-summary">
@@ -1310,6 +1374,7 @@ const renderScoreReviewPage = () => {
           <span class="summary-chip">run ${escapeHtml(String(scoreRun.id ?? scoreReview.scoreRunId).slice(0, 8))}</span>
           <span class="summary-chip">items ${escapeHtml(formatScoreReviewRange())}</span>
           <span class="summary-chip">page ${escapeHtml(formatCount(scoreReview.page))} / ${escapeHtml(formatCount(scoreReview.totalPages))}</span>
+          <span class="summary-chip">sort ${escapeHtml(formatScoreReviewSortLabel(sortOrder))}</span>
         </div>
         <p class="subtle">completed ${escapeHtml(formatDateTime(scoreRun.completedAt))}</p>
       </div>
@@ -1380,24 +1445,63 @@ const installScoreReviewHandlers = () => {
     }
 
     const action = control.dataset.action;
-    if (action !== "score-review-prev" && action !== "score-review-next") {
+    let nextPage = state.ui.scoreReview.page;
+
+    if (action === "score-review-sort") {
+      const nextSortOrder = normalizeScoreReviewSortOrder(control.dataset.sortOrder);
+      if (nextSortOrder === state.ui.scoreReview.sortOrder) {
+        return;
+      }
+      state.ui.scoreReview.sortOrder = nextSortOrder;
+      nextPage = 1;
+    } else if (action === "score-review-prev") {
+      nextPage = state.ui.scoreReview.page - 1;
+    } else if (action === "score-review-next") {
+      nextPage = state.ui.scoreReview.page + 1;
+    } else {
       return;
     }
 
-    const nextPage = action === "score-review-prev"
-      ? state.ui.scoreReview.page - 1
-      : state.ui.scoreReview.page + 1;
-
     try {
-      setStatus("score-review-status", "loading score review...");
-      await loadScoreReviewPage(nextPage);
-      renderAll();
+      await reloadScoreReviewPage(nextPage);
+    } catch (error) {
+      setStatus("score-review-status", error instanceof Error ? error.message : String(error), true);
+    }
+  });
+
+  container.addEventListener("submit", async (event) => {
+    const form = event.target.closest('[data-role="score-review-page-jump"]');
+    if (!form) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const input = form.querySelector('[data-role="score-review-page-input"]');
+    const nextPage = resolveScoreReviewTargetPage(input?.value);
+    if (nextPage === null) {
       setStatus(
         "score-review-status",
-        state.ui.scoreReview.totalItems
-          ? `showing ${formatScoreReviewRange()}`
-          : "score result not available yet",
+        `page must be a number between 1 and ${formatCount(Math.max(1, Number(state.ui.scoreReview.totalPages) || 1))}`,
+        true,
       );
+      if (input) {
+        input.value = String(state.ui.scoreReview.page);
+      }
+      return;
+    }
+
+    if (input) {
+      input.value = String(nextPage);
+    }
+
+    if (nextPage === state.ui.scoreReview.page) {
+      renderScoreReviewStatus();
+      return;
+    }
+
+    try {
+      await reloadScoreReviewPage(nextPage);
     } catch (error) {
       setStatus("score-review-status", error instanceof Error ? error.message : String(error), true);
     }

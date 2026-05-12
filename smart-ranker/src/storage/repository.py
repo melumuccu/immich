@@ -1080,16 +1080,23 @@ class StorageRepository:
         score_run_id: str,
         limit: int,
         offset: int = 0,
+        sort_order: str = "asc",
     ) -> list[sqlite3.Row]:
         normalized_limit = max(1, int(limit))
         normalized_offset = max(0, int(offset))
+        normalized_sort_order = "desc" if str(sort_order).lower() == "desc" else "asc"
+        order_by_sql = (
+            "rank_index DESC, total_score DESC, immich_asset_id DESC"
+            if normalized_sort_order == "desc"
+            else "rank_index ASC, total_score ASC, immich_asset_id ASC"
+        )
         with self._open() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT *
                 FROM score_result
                 WHERE profile_id = ? AND score_run_id = ?
-                ORDER BY rank_index ASC, total_score ASC, immich_asset_id ASC
+                ORDER BY {order_by_sql}
                 LIMIT ? OFFSET ?
                 """,
                 (profile_id, score_run_id, normalized_limit, normalized_offset),

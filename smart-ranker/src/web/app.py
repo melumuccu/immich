@@ -5,9 +5,10 @@ import json
 import logging
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from smart_ranker.immich_client import AssetReadClient, ImmichHttpError, ImmichSession, PeopleClient
@@ -90,19 +91,30 @@ def create_app(
     app.state.live_reload_watch_dir = web_dir
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-    def _render_console() -> FileResponse:
-        return FileResponse(static_dir / "index.html")
+    def _render_console() -> HTMLResponse:
+        asset_version = _build_live_reload_token()
+        asset_query = urlencode({"v": asset_version})
+        html = (static_dir / "index.html").read_text(encoding="utf-8")
+        html = html.replace(
+            'href="/static/styles.css"',
+            f'href="/static/styles.css?{asset_query}"',
+        )
+        html = html.replace(
+            'src="/static/app.js"',
+            f'src="/static/app.js?{asset_query}"',
+        )
+        return HTMLResponse(content=html)
 
     @app.get("/")
-    def index() -> FileResponse:
+    def index() -> HTMLResponse:
         return _render_console()
 
     @app.get("/settings")
-    def settings() -> FileResponse:
+    def settings() -> HTMLResponse:
         return _render_console()
 
     @app.get("/score-review")
-    def score_review() -> FileResponse:
+    def score_review() -> HTMLResponse:
         return _render_console()
 
     def _build_live_reload_token() -> str:
@@ -228,6 +240,9 @@ def create_app(
             "thumbnailUrl": f"/api/assets/{asset_id}/thumbnail",
         }
 
+    def _normalize_score_review_sort_order(value: str | None) -> str:
+        return "desc" if str(value or "").lower() == "desc" else "asc"
+
     @app.post("/api/jobs/{job_type}")
     def submit_job(job_type: str, payload: dict | None = None) -> JSONResponse:
         if job_type not in {"learn", "score", "apply"}:
@@ -332,9 +347,11 @@ def create_app(
         page: int = 1,
         page_size: int = Query(100, alias="pageSize"),
         score_run_id: str | None = Query(None, alias="scoreRunId"),
+        sort_order: str = Query("asc", alias="sortOrder"),
     ) -> dict:
         normalized_page_size = min(max(1, int(page_size)), 100)
         requested_page = max(1, int(page))
+        resolved_sort_order = _normalize_score_review_sort_order(sort_order)
 
         selected_score_run = (
             app.state.repository.get_score_run(app.state.profile_id, score_run_id)
@@ -346,6 +363,7 @@ def create_app(
                 "scoreRunId": None,
                 "page": 1,
                 "pageSize": normalized_page_size,
+                "sortOrder": resolved_sort_order,
                 "totalItems": 0,
                 "totalPages": 0,
                 "items": [],
@@ -364,12 +382,14 @@ def create_app(
             score_run_id=resolved_score_run_id,
             limit=normalized_page_size,
             offset=offset,
+            sort_order=resolved_sort_order,
         )
 
         return {
             "scoreRunId": resolved_score_run_id,
             "page": resolved_page,
             "pageSize": normalized_page_size,
+            "sortOrder": resolved_sort_order,
             "totalItems": total_items,
             "totalPages": total_pages,
             "items": [_serialize_score_result_row(row) for row in rows],

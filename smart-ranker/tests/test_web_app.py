@@ -506,6 +506,8 @@ class WebAppTest(unittest.TestCase):
             self.assertIn("Event Ledger", html.text)
             self.assertIn("score review", html.text)
             self.assertIn("settings", html.text)
+            self.assertIn('/static/styles.css?v=', html.text)
+            self.assertIn('/static/app.js?v=', html.text)
             self.assertIn("Person Group", settings_html.text)
             self.assertIn("score review", score_review_html.text)
 
@@ -574,6 +576,7 @@ class WebAppTest(unittest.TestCase):
             html = client.get("/score-review")
             page_one = client.get("/api/score-review")
             page_two = client.get("/api/score-review", params={"page": 2, "scoreRunId": "score-run-1"})
+            page_desc = client.get("/api/score-review", params={"sortOrder": "desc"})
             thumbnail = client.get("/api/assets/asset-010/thumbnail")
 
             self.assertEqual(200, html.status_code)
@@ -583,6 +586,7 @@ class WebAppTest(unittest.TestCase):
             page_one_payload = page_one.json()
             self.assertEqual("score-run-1", page_one_payload["scoreRunId"])
             self.assertEqual(100, page_one_payload["pageSize"])
+            self.assertEqual("asc", page_one_payload["sortOrder"])
             self.assertEqual(105, page_one_payload["totalItems"])
             self.assertEqual(2, page_one_payload["totalPages"])
             self.assertEqual(100, len(page_one_payload["items"]))
@@ -594,6 +598,11 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(2, page_two_payload["page"])
             self.assertEqual(5, len(page_two_payload["items"]))
             self.assertEqual("asset-101", page_two_payload["items"][0]["immichAssetId"])
+
+            self.assertEqual(200, page_desc.status_code)
+            page_desc_payload = page_desc.json()
+            self.assertEqual("desc", page_desc_payload["sortOrder"])
+            self.assertEqual("asset-105", page_desc_payload["items"][0]["immichAssetId"])
 
             self.assertEqual(200, thumbnail.status_code)
             self.assertEqual(b"thumbnail-bytes", thumbnail.content)
