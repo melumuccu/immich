@@ -258,7 +258,8 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(1, apply_status["result"]["appliedCount"])
             self.assertEqual(["neutral-low"], apply_status["result"]["assetIds"])
             self.assertEqual(1, len(action_client.calls))
-            self.assertEqual("trash_assets", action_client.calls[0][0])
+            self.assertEqual("add_assets_to_album", action_client.calls[0][0])
+            self.assertEqual("album-1", action_client.calls[0][1])
 
             ledger = client.get("/api/event-ledger").json()
             self.assertEqual(1, len(ledger["favoriteSignals"]))
@@ -476,7 +477,7 @@ class WebAppTest(unittest.TestCase):
                     immich_asset_id="asset-1",
                     score_run_id="score-run-1",
                     action_log_id="log-1",
-                    reason="auto-trash",
+                    reason="review-album",
                     excluded_at="2026-05-09T12:02:00Z",
                 )
             )

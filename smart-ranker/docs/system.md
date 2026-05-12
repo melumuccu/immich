@@ -16,10 +16,10 @@
 
 ## 設計方針
 
-- Immich 本体のデータを主系とし、Smart Ranker 側は設定、手動学習 signal、score snapshot、auto trash 除外台帳、ジョブ履歴を保持する。
+- Immich 本体のデータを主系とし、Smart Ranker 側は設定、手動学習 signal、score snapshot、Review Album 送付台帳、ジョブ履歴を保持する。
 - `collect` と `train` は分けず、手動 favorite / manual trash の同期とモデル更新を `learn` でまとめて行う。
 - `score` は asset 全件を対象にし、最新 completed run を GUI の唯一の表示基準にする。
-- `apply` は GUI で保持する閾値を使って trash を実行し、そこで trash に入れた asset を future `learn` から除外する。
+- `apply` は GUI で保持する閾値を使って Review Album 追加を実行し、`apply_exclusion_asset` で重複 apply を抑止する。future `learn` の negative は manual trash だけに限定する。
 - GUI から変更しうる設定は DB に寄せる。
 - 画像と動画を同一パイプラインで扱うが、動画スコアは Immich の preview image と通常メタデータに依存する近似値とみなす。
 
@@ -98,14 +98,14 @@ flowchart TB
 
 | コンポーネント | 主責務 | 主な入出力 |
 | --- | --- | --- |
-| `Training Signal Collector` | current favorite と current trash の同期。解除、restore の終了記録。auto trash 除外の参照。 | 入力: Immich asset 状態、出力: `favorite_signal`, `trash_signal`, `sync_cursor` |
+| `Training Signal Collector` | current favorite と current trash の同期。解除、restore の終了記録。Review Album 経由の manual trash も同じ signal として扱う。 | 入力: Immich asset 状態、出力: `favorite_signal`, `trash_signal`, `sync_cursor` |
 | `Config Service` | GUI 設定の読書き。人物グループ、カテゴリ、閾値、保護ルールの管理。 | 入力: GUI 更新、出力: 設定 DB |
 | `Label Resolver` | People、通常メタデータ、smart search の弱ラベル、ルーティングルールから候補ラベル集合を生成。 | 入力: asset、設定 DB、弱ラベル候補、出力: ラベル集合 |
 | `Training Engine` | 手動 signal を教師信号へ再構成し、ラベル別モデルと汎用モデルを学習。 | 入力: asset、embedding、`favorite_signal`, `trash_signal`、出力: 学習済みモデル |
 | `Inference Engine` | asset 全件の score 算出と run 単位の snapshot 保存。 | 入力: asset、embedding、モデル、出力: `score_run`, `score_result` |
 | `Score Review Service` | GUI 向けに score 順一覧を返し、最新 run を基準に閾値変更の影響を見せる。 | 入力: `score_result`、閾値設定、出力: 一覧 API |
-| `Threshold Policy Engine` | 閾値、保護ルール、現在状態から trash 対象を選定する。 | 入力: score、設定 DB、出力: 実行計画 |
-| `Action Executor` | Immich API への trash 実行、実行結果記録、auto trash 除外登録。 | 入力: 実行計画、出力: `action_execution_log`, `apply_exclusion_asset` |
+| `Threshold Policy Engine` | 閾値、保護ルール、現在状態から Review Album 送付対象を選定する。 | 入力: score、設定 DB、出力: 実行計画 |
+| `Action Executor` | Immich API への Review Album 追加、実行結果記録、重複 apply 抑止登録。 | 入力: 実行計画、出力: `action_execution_log`, `apply_exclusion_asset` |
 | `Model Store` | 学習済みモデルとメタ情報の保存。 | 入力: 学習結果、出力: モデル読出し |
 
 ## データストアの役割分担
@@ -125,9 +125,9 @@ flowchart TB
 - favorite signal と trash signal の長期保持
 - GUI 変更可能な運用設定
 - score snapshot と閾値設定
-- `apply` 由来 asset の除外台帳
+- `apply` 由来 asset の Review Album 送付台帳
 - 学習済みモデルのメタデータ
-- ジョブ実行履歴と trash 実行ログ
+- ジョブ実行履歴と action 実行ログ
 
 ## Smart Ranker DB に置く項目
 
@@ -222,7 +222,7 @@ flowchart LR
 | `ImmichSession` | `base_url`、認証ヘッダ、timeout、retry の統一 | GET / POST / PUT / DELETE の共通実行 |
 | `AssetReadClient` | asset 一覧、favorite 一覧、trash 一覧、People 付き snapshot の取得 | asset metadata、search metadata 系 |
 | `PeopleClient` | Person 解決とキャッシュ更新 | people list、person search 系 |
-| `ActionWriteClient` | trash / restore 反映 | asset delete / restore 系 |
+| `ActionWriteClient` | Review Album 追加 / trash / restore 反映 | album / asset action 系 |
 | `CapabilityRegistry` | Immich バージョン差分の吸収 | 起動時 capability check |
 | `DtoNormalizer` | Immich 応答の内部 DTO 化 | `AssetSnapshot`, `PersonSnapshot`, `ActionResult` |
 
@@ -272,7 +272,7 @@ flowchart LR
 | `learn_model` | 6 時間ごと | `ProcessPoolExecutor` | current favorite / current trash の同期、手動 signal 再構成、モデル学習 |
 | `sync_people_catalog` | 30 分ごと | 軽量同期実行 | Person 一覧同期と名前解決 |
 | `score_all_assets` | 6 時間ごと | `ProcessPoolExecutor` | asset 全件の score snapshot 生成 |
-| `apply_trash_threshold` | 既定無効。手動実行 | 軽量同期実行 | 最新 threshold に基づく trash 実行と除外台帳更新 |
+| `apply_review_threshold` | 既定無効。手動実行 | 軽量同期実行 | 最新 threshold に基づく Review Album 送付と送付台帳更新 |
 | `cleanup_runtime_state` | 毎日 04:00 | 軽量同期実行 | 古い score snapshot、不要な run 履歴の整理 |
 
 ### 実行制御
@@ -281,7 +281,7 @@ flowchart LR
 1. 無効化された job は登録しない。
 1. 手動実行は GUI から発火し、scheduler の one-shot job として登録する。
 1. 実行結果は成功、失敗、スキップを履歴へ残す。
-1. `apply_trash_threshold` は対象 `score_run` と threshold 値を履歴へ固定して実行する。
+1. `apply_review_threshold` は対象 `score_run` と threshold 値を履歴へ固定して実行する。
 
 ## GUI 構成
 
@@ -305,7 +305,7 @@ flowchart LR
 | `Score Review` | 全件 score の確認 | スコア順一覧、状態フィルタ、閾値変更、対象件数確認 |
 | `Policies` | 閾値と保護設定 | 削除閾値、保護条件、apply 実行可否の調整 |
 | `Jobs & Models` | 運用制御 | `learn`、`score`、`apply` の手動実行 |
-| `Event Ledger` | 監査とデバッグ | signal 状態、auto trash 除外、job 履歴確認 |
+| `Event Ledger` | 監査とデバッグ | signal 状態、Review Album 送付台帳、job 履歴確認 |
 
 ### ルーティング構成
 
@@ -379,7 +379,7 @@ flowchart LR
 ### `learn`
 
 1. Immich API から current favorite と current trash を取得する。
-1. `apply_exclusion_asset` を参照し、auto trash 済み asset を trash 側収集から除外する。
+1. Review Album 経由でユーザーが手動 trash した asset も、current trash として同じ収集対象に含める。
 1. `favorite_signal` と `trash_signal` を upsert し、状態解除時は終了時刻だけを更新する。
 1. `Label Resolver` が People、OCR、ファイルメタデータ、smart search の弱ラベルからカテゴリ候補を決定する。
 1. 手動 signal の直近状態から教師信号を再構成する。
@@ -396,8 +396,8 @@ flowchart LR
 
 1. GUI で保持している threshold と最新 completed `score_run` を読む。
 1. 閾値以下、未保護、未 trash の asset を抽出する。
-1. `Action Executor` が Immich API へ trash を反映する。
-1. 成功した asset を `apply_exclusion_asset` に登録し、future `learn` から除外する。
+1. `Action Executor` が Immich API へ Review Album 追加を反映する。
+1. 成功した asset を `apply_exclusion_asset` に登録し、同じ asset の重複 apply を防ぐ。
 
 ## ラベルルーティングの実装方針
 
@@ -441,7 +441,7 @@ flowchart LR
 | People 解決 | `/people` または検索系 API |
 | 非人物系弱ラベル候補 | `search/smart` |
 | CLIP embedding 取得 | Immich DB read-only の `smart_search` |
-| trash 反映 | asset delete / trash 系 API |
+| Review Album 追加 | album asset 追加系 API |
 | restore 反映 | asset restore 系 API |
 
 具体的なエンドポイント名は Immich バージョン差分の影響を受けるため、実装では API クライアント層に隠蔽する。
@@ -457,7 +457,7 @@ flowchart LR
 
 - Immich 側の trash を無効化すると manual negative の運用前提が崩れる。
 - `score_all_assets` は asset 全件を読むため、asset 数が増えると実行時間が伸びる。
-- `apply_exclusion_asset` を解除しない限り、auto trash 済み asset は `learn` の negative として戻らない。
+- `apply_exclusion_asset` を解除しない限り、Review Album へ送付済みの asset は repeated apply の対象へ戻らない。
 - Person 未命名や顔未検出の asset では「家族」「我が子」は付与できない。
 - 動画スコアは代表フレーム依存のため、人物やイベント検出に偏りが出る可能性がある。
 - `search/smart` の結果は Immich 側のモデルやクエリ語に依存するため、弱ラベルとしてのみ扱う。

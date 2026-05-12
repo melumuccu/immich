@@ -46,9 +46,9 @@ class FakeActionClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, object]] = []
 
-    def trash_assets(self, asset_ids: list[str], *, force: bool = False) -> ActionResult:
-        self.calls.append(("trash_assets", list(asset_ids), {"force": force}))
-        return ActionResult(status_code=200, ok=True, payload={"ids": list(asset_ids), "force": force})
+    def add_assets_to_album(self, album_id: str, asset_ids: list[str]) -> ActionResult:
+        self.calls.append(("add_assets_to_album", album_id, list(asset_ids)))
+        return ActionResult(status_code=200, ok=True, payload={"albumId": album_id, "ids": list(asset_ids)})
 
 
 class InferenceTest(unittest.TestCase):
@@ -97,22 +97,22 @@ class InferenceTest(unittest.TestCase):
             self.assertEqual("candidate-low", score_results[0]["immich_asset_id"])
             self.assertEqual("candidate-high", score_results[1]["immich_asset_id"])
 
-    def test_apply_score_threshold_trashes_only_low_score_assets(self) -> None:
+    def test_apply_score_threshold_adds_only_low_score_assets_to_review_album(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository, paths, feature_assembler, label_resolver, training_result = self._prepare_training(Path(temp_dir))
             repository.insert_action_policy(
                 policy_id="policy-1",
                 profile_id="profile-1",
                 policy_key="review-policy",
-                display_name="Trash Threshold Policy",
+                display_name="Review Threshold Policy",
                 execution_mode="manual",
             )
             repository.insert_action_destination(
-                destination_id="dest-trash",
+                destination_id="dest-review-album",
                 profile_id="profile-1",
-                destination_key="trash-bin",
-                destination_type="trash",
-                immich_resource_id="trash",
+                destination_key="review-album",
+                destination_type="album",
+                immich_resource_id="album-1",
             )
 
             score_inputs = [
@@ -148,7 +148,8 @@ class InferenceTest(unittest.TestCase):
                 score_run_id=summary.score_run_id,
                 threshold_value=0.5,
                 action_policy_id="policy-1",
-                destination_id="dest-trash",
+                destination_id="dest-review-album",
+                review_album_resource_id="album-1",
                 occurred_at="2026-05-09T12:31:00Z",
                 dry_run=False,
             )
@@ -156,15 +157,18 @@ class InferenceTest(unittest.TestCase):
             self.assertEqual(1, len(applied_records))
             self.assertEqual("candidate-low", applied_records[0].immich_asset_id)
             self.assertEqual(1, len(action_client.calls))
-            self.assertEqual("trash_assets", action_client.calls[0][0])
+            self.assertEqual("add_assets_to_album", action_client.calls[0][0])
+            self.assertEqual("album-1", action_client.calls[0][1])
 
             action_logs = repository.list_action_execution_logs("profile-1")
             self.assertEqual(1, len(action_logs))
             self.assertEqual("executed", action_logs[0]["status"])
+            self.assertEqual("add_to_album", action_logs[0]["action_type"])
 
             exclusions = repository.list_apply_exclusion_assets("profile-1")
             self.assertEqual(1, len(exclusions))
             self.assertEqual("candidate-low", exclusions[0]["immich_asset_id"])
+            self.assertEqual("review-album", exclusions[0]["reason"])
 
     @staticmethod
     def _prepare_training(temp_root: Path):

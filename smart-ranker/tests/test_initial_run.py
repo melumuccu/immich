@@ -42,6 +42,10 @@ class FakeActionClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, object]] = []
 
+    def add_assets_to_album(self, album_id: str, asset_ids: list[str]) -> ActionResult:
+        self.calls.append(("add_assets_to_album", album_id, list(asset_ids)))
+        return ActionResult(status_code=200, ok=True, payload={"albumId": album_id, "ids": list(asset_ids)})
+
     def trash_assets(self, asset_ids: list[str], *, force: bool = False) -> ActionResult:
         self.calls.append(("trash_assets", list(asset_ids), {"force": force}))
         return ActionResult(status_code=200, ok=True, payload={"ids": list(asset_ids), "force": force})
@@ -115,6 +119,7 @@ class InitialRunTest(unittest.TestCase):
                     }
                 ),
                 action_client=action_client,
+                review_album_resource_id="album-1",
                 review_threshold=0.5,
                 now_factory=lambda: "2026-05-09T12:00:00Z",
             )
@@ -143,6 +148,8 @@ class InitialRunTest(unittest.TestCase):
             self.assertEqual(1, len(repository.list_apply_exclusion_assets("profile-1")))
             self.assertEqual(1, len(repository.list_action_execution_logs("profile-1")))
             self.assertEqual(1, len(action_client.calls))
+            self.assertEqual("add_assets_to_album", action_client.calls[0][0])
+            self.assertEqual("album-1", action_client.calls[0][1])
 
             self.assertEqual(
                 {"isFavorite": True, "size": 1000, "page": 1},
@@ -156,6 +163,84 @@ class InitialRunTest(unittest.TestCase):
                 {"size": 1000, "page": 1},
                 asset_client.calls[2],
             )
+
+    def test_review_album_candidate_can_be_learned_after_manual_trash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bootstrap_result = bootstrap_storage(state_dir=Path(temp_dir) / "state")
+            repository = StorageRepository(bootstrap_result.paths.db_path)
+            asset_client = FakeAssetClient(
+                [
+                    SearchResult(
+                        items=[make_asset(asset_id="child-positive", favorite=True, people=("kid-1",))],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                    SearchResult(
+                        items=[make_asset(asset_id="child-negative", trashed=True, people=("kid-1",))],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                    SearchResult(
+                        items=[
+                            make_asset(asset_id="child-positive", favorite=True, people=("kid-1",)),
+                            make_asset(asset_id="child-negative", trashed=True, people=("kid-1",)),
+                            make_asset(asset_id="neutral-low"),
+                        ],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                    SearchResult(
+                        items=[make_asset(asset_id="child-positive", favorite=True, people=("kid-1",))],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                    SearchResult(
+                        items=[
+                            make_asset(asset_id="child-negative", trashed=True, people=("kid-1",)),
+                            make_asset(asset_id="neutral-low", trashed=True),
+                        ],
+                        next_page=None,
+                        has_next_page=False,
+                        raw={},
+                    ),
+                ]
+            )
+
+            job_service = build_job_service(
+                storage_paths=bootstrap_result.paths,
+                repository=repository,
+                profile_id="profile-1",
+                immich_user_id="immich-user-1",
+                asset_client=asset_client,
+                embedding_reader=FakeEmbeddingReader(
+                    {
+                        "child-positive": [2.0, 1.5],
+                        "child-negative": [-2.0, -1.5],
+                        "neutral-low": [-1.8, -1.4],
+                    }
+                ),
+                action_client=FakeActionClient(),
+                review_album_resource_id="album-1",
+                review_threshold=0.5,
+                now_factory=lambda: "2026-05-09T12:00:00Z",
+            )
+
+            self.assertEqual("completed", job_service.submit("learn", {"trigger": "test"}).status)
+            self.assertEqual("completed", job_service.submit("score", {"trigger": "test"}).status)
+            self.assertEqual("completed", job_service.submit("apply", {"trigger": "test"}).status)
+
+            learn_after_manual_trash = job_service.submit("learn", {"trigger": "manual-trash"})
+
+            self.assertEqual("completed", learn_after_manual_trash.status)
+            self.assertEqual(1, learn_after_manual_trash.result["favoriteSignalCount"])
+            self.assertEqual(2, learn_after_manual_trash.result["trashSignalCount"])
+            self.assertEqual(3, learn_after_manual_trash.result["trainingAssetCount"])
+            self.assertEqual(2, len(repository.list_trash_signals("profile-1")))
+
 
 
 if __name__ == "__main__":

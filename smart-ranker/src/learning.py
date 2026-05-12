@@ -90,9 +90,6 @@ class ManualSignalCollector:
             max_assets=max_assets,
         )
 
-        excluded_asset_ids = self.repository.list_active_apply_exclusion_asset_ids(self.profile_id)
-        filtered_trash_assets = [asset for asset in trash_assets if asset.id not in excluded_asset_ids]
-
         for asset in favorite_assets:
             self.repository.upsert_favorite_signal(
                 FavoriteSignalRecord(
@@ -106,7 +103,7 @@ class ManualSignalCollector:
                 )
             )
 
-        for asset in filtered_trash_assets:
+        for asset in trash_assets:
             self.repository.upsert_trash_signal(
                 TrashSignalRecord(
                     id=str(uuid4()),
@@ -126,17 +123,17 @@ class ManualSignalCollector:
         )
         trash_restored_count = self.repository.mark_missing_trash_signals_restored(
             self.profile_id,
-            [asset.id for asset in filtered_trash_assets],
+            [asset.id for asset in trash_assets],
             restored_at=occurred_at,
         )
 
         return LearningSyncResult(
             favorite_assets=favorite_assets,
-            trash_assets=filtered_trash_assets,
+            trash_assets=trash_assets,
             training_assets=self._build_training_assets(),
             favorite_cleared_count=favorite_cleared_count,
             trash_restored_count=trash_restored_count,
-            excluded_trash_count=max(0, len(trash_assets) - len(filtered_trash_assets)),
+            excluded_trash_count=0,
         )
 
     def _build_training_assets(self) -> list[AssetSnapshot]:

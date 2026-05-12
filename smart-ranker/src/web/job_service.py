@@ -28,9 +28,8 @@ JOB_TYPES = ("learn", "score", "apply")
 DEFAULT_REVIEW_THRESHOLD = 0.5
 DEFAULT_BATCH_SIZE = 1000
 DEFAULT_POLICY_KEY = "review-policy"
-DEFAULT_POLICY_DISPLAY_NAME = "Trash Threshold Policy"
-DEFAULT_TRASH_DESTINATION_KEY = "trash-bin"
-DEFAULT_TRASH_DESTINATION_RESOURCE_ID = "trash"
+DEFAULT_POLICY_DISPLAY_NAME = "Review Threshold Policy"
+DEFAULT_REVIEW_DESTINATION_KEY = "review-album"
 
 
 def utc_now_iso() -> str:
@@ -101,6 +100,7 @@ class SmartRankerJobRunner:
         profile_id: str,
         immich_user_id: str,
         batch_size: int,
+        review_album_resource_id: str | None,
         review_threshold: float,
         now_factory: Callable[[], str],
     ) -> None:
@@ -115,6 +115,7 @@ class SmartRankerJobRunner:
         self.profile_id = profile_id
         self.immich_user_id = immich_user_id
         self.batch_size = batch_size
+        self.review_album_resource_id = review_album_resource_id
         self.review_threshold = review_threshold
         self.now_factory = now_factory
         self.cache = JobRuntimeCache()
@@ -188,12 +189,13 @@ class SmartRankerJobRunner:
     def apply(self, payload: dict[str, Any]) -> dict[str, Any]:
         score_run_id = self._resolve_score_run_id(payload)
         threshold_value = float(payload.get("reviewThreshold", self.review_threshold))
-        action_policy_id, destination_id = self._ensure_apply_context()
+        action_policy_id, destination_id, review_album_resource_id = self._ensure_apply_context()
         records = self.inference_job.apply_score_threshold(
             score_run_id=score_run_id,
             threshold_value=threshold_value,
             action_policy_id=action_policy_id,
             destination_id=destination_id,
+            review_album_resource_id=review_album_resource_id,
             occurred_at=self.now_factory(),
             dry_run=bool(payload.get("dryRun", False)),
         )
@@ -249,7 +251,11 @@ class SmartRankerJobRunner:
             raise JobConfigurationError("No score run available for apply")
         return str(latest_score_run["id"])
 
-    def _ensure_apply_context(self) -> tuple[str, str]:
+    def _ensure_apply_context(self) -> tuple[str, str, str]:
+        review_album_resource_id = (self.review_album_resource_id or "").strip()
+        if not review_album_resource_id:
+            raise JobConfigurationError(f"Missing runtime configuration: {REVIEW_ALBUM_ID_ENV}")
+
         self.repository.ensure_profile(profile_id=self.profile_id, immich_user_id=self.immich_user_id)
         action_policy_id = self.repository.ensure_action_policy(
             policy_id=f"{self.profile_id}-{DEFAULT_POLICY_KEY}",
@@ -259,13 +265,13 @@ class SmartRankerJobRunner:
             execution_mode="manual",
         )
         destination_id = self.repository.ensure_action_destination(
-            destination_id=f"{self.profile_id}-{DEFAULT_TRASH_DESTINATION_KEY}",
+            destination_id=f"{self.profile_id}-{DEFAULT_REVIEW_DESTINATION_KEY}",
             profile_id=self.profile_id,
-            destination_key=DEFAULT_TRASH_DESTINATION_KEY,
-            destination_type="trash",
-            immich_resource_id=DEFAULT_TRASH_DESTINATION_RESOURCE_ID,
+            destination_key=DEFAULT_REVIEW_DESTINATION_KEY,
+            destination_type="album",
+            immich_resource_id=review_album_resource_id,
         )
-        return action_policy_id, destination_id
+        return action_policy_id, destination_id, review_album_resource_id
 
 
 @dataclass(frozen=True)
@@ -385,6 +391,7 @@ def build_job_service(
             profile_id=profile_id,
             immich_user_id=immich_user_id,
             batch_size=_load_learn_batch_size(repository, profile_id),
+            review_album_resource_id=runtime_settings.review_album_resource_id,
             review_threshold=runtime_settings.review_threshold,
             now_factory=now_factory,
         )

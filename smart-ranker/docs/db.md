@@ -3,7 +3,7 @@
 ## 目的
 
 - GUI から変更しうる設定を DB に集約する。
-- v2 は `learn` の手動 signal、`score` の全件 snapshot、`apply` の auto trash 除外台帳を保持できる論理スキーマを定義する。
+- v2 は `learn` の手動 signal、`score` の全件 snapshot、`apply` の Review Album 送付台帳を保持できる論理スキーマを定義する。
 - 物理 DB は SQLite または Postgres のどちらでも載せ替え可能とする。
 
 ## 対象範囲
@@ -16,7 +16,7 @@
 | 保護対象ルール | `protected_rule` |
 | favorite の手動 signal | `favorite_signal` |
 | trash の手動 signal | `trash_signal` |
-| auto trash 除外台帳 | `apply_exclusion_asset` |
+| Review Album 送付台帳 | `apply_exclusion_asset` |
 | score 閾値 | `score_threshold_policy` |
 | score snapshot | `score_run`, `score_result` |
 | モデル割当 | `model_registry`, `model_assignment` |
@@ -30,7 +30,7 @@
 - 設定のスコープ単位は `ranker_profile` とする。
 - Immich 側の Person は Smart Ranker 側では参照 ID として保持する。
 - favorite と trash は別テーブルで保持し、解除や restore の後も行を残す。
-- `apply` が trash へ移した asset は `apply_exclusion_asset` に登録し、`learn` の再収集対象から外す。
+- `apply` が Review Album へ送った asset は `apply_exclusion_asset` に登録し、同じ asset の重複 apply を防ぐ。
 - score は run 単位で保存し、GUI は最新 completed `score_run` を表示基準にする。
 - 条件式は `match_json`、可変設定は `config_json`、一覧表示補助は `display_json` に寄せる。
 - `JSON` 型は SQLite では `TEXT + JSON バリデーション`、Postgres では `JSONB` を想定する。
@@ -270,7 +270,7 @@ erDiagram
 | テーブル | 役割 | 主カラム |
 | --- | --- | --- |
 | `routing_rule` | asset へカテゴリを追加付与する条件。 | `category_id`, `rule_name`, `priority`, `match_json`, `assignment_mode`, `stop_after_match`, `enabled` |
-| `protected_rule` | auto trash から除外する条件。 | `rule_name`, `priority`, `match_json`, `blocked_actions_json`, `protect_scope`, `enabled` |
+| `protected_rule` | Review Album 送付から除外する条件。 | `rule_name`, `priority`, `match_json`, `blocked_actions_json`, `protect_scope`, `enabled` |
 
 ### 学習 signal の保持
 
@@ -278,7 +278,7 @@ erDiagram
 | --- | --- | --- |
 | `favorite_signal` | current favorite と過去 favorite の手動 signal を保持する。解除後も消さない。 | `immich_asset_id`, `first_seen_at`, `last_seen_at`, `cleared_at`, `metadata_json` |
 | `trash_signal` | current trash と過去 manual trash の手動 signal を保持する。restore 後も消さない。 | `immich_asset_id`, `first_seen_at`, `last_seen_at`, `restored_at`, `metadata_json` |
-| `apply_exclusion_asset` | `apply` で trash へ移した asset を future `learn` から除外する。 | `immich_asset_id`, `score_run_id`, `action_log_id`, `reason`, `excluded_at`, `active` |
+| `apply_exclusion_asset` | `apply` で Review Album へ送った asset の重複 apply を抑止する。 | `immich_asset_id`, `score_run_id`, `action_log_id`, `reason`, `excluded_at`, `active` |
 | `sync_cursor` | favorite / trash 同期や API pagination の水位を保持する。 | `cursor_key`, `cursor_value`, `last_succeeded_at`, `last_run_id` |
 
 ### モデルと score 制御
@@ -360,8 +360,8 @@ erDiagram
 
 - `favorite_signal` と `trash_signal` は追記型ではなく、asset ごとに長寿命行を持つ stateful ledger とする。
 - favorite 解除時は `favorite_signal.cleared_at` を、restore 時は `trash_signal.restored_at` を更新する。
-- `learn` は `apply_exclusion_asset.active = true` の asset を trash 側 signal として再収集しない。
-- `apply_exclusion_asset` を解除しない限り、auto trash 済み asset は manual negative に戻らない。
+- `learn` は current trash をそのまま同期し、Review Album 経由でユーザーが手動 trash した asset も通常どおり `trash_signal` に入れる。
+- `apply_exclusion_asset` を解除しない限り、Review Album へ送付済み asset は repeated apply の対象へ戻らない。
 - `score_run` は status=`completed` の最新行だけを GUI の既定表示対象にする。
 - `score_result.rank_index` は GUI の昇順一覧を高速に返すために保存する。
 - `job_run.job_type` は `learn_model`, `score_all_assets`, `apply_trash_threshold`, `sync_people_catalog`, `cleanup_runtime_state` を想定する。
@@ -502,5 +502,5 @@ CREATE TABLE IF NOT EXISTS apply_exclusion_asset (
 1. `favorite_signal` と `trash_signal` は、signal 自体を残すテーブルであり、現在状態の mirror ではない。
 1. `routing_rule.match_json` の `smart_queries` に、風景、ペットなどの `search/smart` クエリ語を保持する。
 1. `score_threshold_policy` は初回は profile 単位 1 行で始め、必要になったら `media_scope` 別へ広げる。
-1. `apply_exclusion_asset.active` を `0` に戻す運用を入れれば、auto trash 済み asset を再び `learn` 対象へ戻せる。
+1. `apply_exclusion_asset.active` を `0` に戻す運用を入れれば、Review Album へ送付済み asset を再び apply 対象へ戻せる。
 1. モデル本体は引き続きファイル保存とし、DB にはモデルの識別子と保存先だけを残す。

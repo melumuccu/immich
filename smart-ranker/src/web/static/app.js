@@ -546,7 +546,7 @@ const buildStageCards = () => {
       jobRun: applyRun,
       fallbackActive: latestAction !== null,
       note: applyRun
-        ? "threshold 以下の asset を trash へ送った結果です。"
+        ? "threshold 以下の asset を Review Album へ送った結果です。"
         : latestAction
           ? "保存済み action log から直近の apply を可視化しています。"
           : "apply 実行後に action log がここへ反映されます。",
@@ -805,7 +805,7 @@ const updatePersonGroup = (groupKey, updater) => {
 
 const getReviewPolicy = () => state.settings.policies.find((policy) => policy.policyKey === DEFAULT_POLICY_KEY) ?? {
   policyKey: DEFAULT_POLICY_KEY,
-  displayName: "Trash Threshold Policy",
+  displayName: "Review Threshold Policy",
   executionMode: "manual",
   display: {
     reviewThreshold: DEFAULT_REVIEW_THRESHOLD,
@@ -1603,7 +1603,7 @@ const syncPoliciesStateFromDom = () => {
 
   const nextPolicy = {
     ...reviewPolicy,
-    displayName: document.getElementById("policy-display-name").value.trim() || "Trash Threshold Policy",
+    displayName: document.getElementById("policy-display-name").value.trim() || "Review Threshold Policy",
     executionMode: document.getElementById("policy-execution-mode").value,
     enabled: document.getElementById("policy-enabled").checked,
     display: {

@@ -17,9 +17,9 @@
 - [ ] favorite 解除時の `cleared_at`、restore 時の `restored_at` を保持する。
 - [ ] 直近 manual signal を教師ラベルへ再構成するロジックを決める。
 
-- [ ] auto trash 除外台帳の導入
+- [ ] Review Album 送付台帳の導入
 - [ ] `apply_exclusion_asset` を追加する。
-- [ ] `apply` によって trash へ移した asset を future `learn` から除外する。
+- [ ] `apply` によって Review Album へ送った asset の重複 apply を抑止する。
 - [ ] 除外解除の運用フローを GUI か運用 runbook のどちらで持つか決める。
 
 - [ ] `score` の全件化
@@ -30,7 +30,7 @@
 - [ ] 閾値 GUI と `apply` の接続
 - [ ] GUI で削除閾値を編集できるようにする。
 - [ ] `apply` が最新 threshold と最新 score snapshot を読むようにする。
-- [ ] 閾値以下、未保護、未 trash の asset を一括 trash する。
+- [ ] 閾値以下、未保護、未 trash の asset を一括で Review Album へ送る。
 
 - [ ] API と job 実行経路の整理
 - [ ] `/api/jobs/{job_type}` を `learn`, `score`, `apply` の 3 系統へ寄せる。
@@ -40,7 +40,7 @@
 - [ ] テスト更新
 - [ ] `learn` の signal 同期とラベル再構成の unit test を追加する。
 - [ ] `score` 全件化に合わせて GUI/API の一覧 test を更新する。
-- [ ] `apply` 後に対象 asset が `learn` へ戻らないことを E2E で確認する。
+- [ ] `apply` 後に Review Album 候補を手動 trash した asset が `learn` に入ることを E2E で確認する。
 
 ## 実運用前の確認
 

@@ -124,7 +124,7 @@ class ActionExecutor:
                 )
             )
 
-    def apply_trash_threshold(
+    def apply_review_threshold(
         self,
         *,
         trace_id: str,
@@ -134,13 +134,14 @@ class ActionExecutor:
         threshold_value: float,
         action_policy_id: str,
         destination_id: str,
+        review_album_resource_id: str,
         occurred_at: str,
         dry_run: bool,
         execution_mode: str,
     ) -> AppliedAssetRecord:
         request = {
-            "ids": [asset_id],
-            "force": False,
+            "albumId": review_album_resource_id,
+            "assetIds": [asset_id],
             "scoreRunId": score_run_id,
             "threshold": threshold_value,
         }
@@ -149,7 +150,10 @@ class ActionExecutor:
         error_message = None
         if not dry_run:
             try:
-                client_result = self.action_client.trash_assets([asset_id], force=False)
+                client_result = self.action_client.add_assets_to_album(
+                    review_album_resource_id,
+                    [asset_id],
+                )
                 response = client_result.payload if hasattr(client_result, "payload") else {}
                 status = "executed"
             except Exception as error:  # pragma: no cover - defensive path
@@ -165,7 +169,7 @@ class ActionExecutor:
                 action_policy_id=action_policy_id,
                 destination_id=destination_id,
                 immich_asset_id=asset_id,
-                action_type="move_to_trash",
+                action_type="add_to_album",
                 execution_mode=execution_mode,
                 dry_run=dry_run,
                 status=status,
@@ -184,7 +188,7 @@ class ActionExecutor:
                     immich_asset_id=asset_id,
                     score_run_id=score_run_id,
                     action_log_id=action_log_id,
-                    reason="auto-trash",
+                    reason="review-album",
                     excluded_at=occurred_at,
                 )
             )
@@ -428,6 +432,7 @@ class InferenceJob:
         threshold_value: float,
         action_policy_id: str,
         destination_id: str,
+        review_album_resource_id: str,
         occurred_at: str,
         dry_run: bool,
         execution_mode: str = "manual",
@@ -450,7 +455,7 @@ class InferenceJob:
 
             trace_id = self._ensure_trace_id(row=row, threshold_value=threshold_value, occurred_at=occurred_at)
             applied_records.append(
-                self.action_executor.apply_trash_threshold(
+                self.action_executor.apply_review_threshold(
                     trace_id=trace_id,
                     asset_id=asset_id,
                     score_run_id=score_run_id,
@@ -458,6 +463,7 @@ class InferenceJob:
                     threshold_value=threshold_value,
                     action_policy_id=action_policy_id,
                     destination_id=destination_id,
+                    review_album_resource_id=review_album_resource_id,
                     occurred_at=occurred_at,
                     dry_run=dry_run,
                     execution_mode=execution_mode,

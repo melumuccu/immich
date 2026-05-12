@@ -15,7 +15,7 @@
 
 - `learn`: Immich の favorite asset と trash asset だけを収集し、`favorite_signal` と `trash_signal` を更新したうえで学習済みモデルと設定スナップショットを保存する。favorite 解除や restore 後も signal は保持する。
 - `score`: すべての asset を学習済みモデルで採点し、`score_run` と `score_result` を保存する。GUI の score review page はこの結果をスコア順で 100 件ずつ表示する。
-- `apply`: 現在の threshold 以下の asset を trash へ移動し、`action_execution_log` と `apply_exclusion_asset` を残す。ここで trash へ移した asset は次回の `learn` では再収集しない。
+- `apply`: 現在の threshold 以下の asset を Review Album へ追加し、`action_execution_log` と `apply_exclusion_asset` を残す。`apply_exclusion_asset` は重複 apply の抑止に使い、ユーザーがあとで手動 trash した asset は次回の `learn` で通常どおり再収集する。
 
 ## 日常での使い方と対象
 
@@ -23,13 +23,13 @@
 
 - `learn`
     - 日常での使い方: favorite / trash を教師信号として取り込みたいときに回す。favorite 解除や restore 後も学習用 signal を残したいので、まずこれを回す。
-    - 対象: 現在 favorite の asset と、現在 trash にある asset。ただし `apply` によって trash へ移した asset は除外する。
+    - 対象: 現在 favorite の asset と、現在 trash にある asset。Review Album からユーザーが手動 trash した asset もここへ入る。
 - `score`
     - 日常での使い方: 学習済みモデルで全件採点し、GUI の score review を更新したいときに回す。threshold 調整前の確認手順。
     - 対象: Immich 上のすべての asset。
 - `apply`
-    - 日常での使い方: score review で threshold を確認した後、threshold 以下の asset を本当に trash へ移したいときに回す。
-    - 対象: 直近の `score` で保存された `score_result`。すでに trash 済みの asset や自動 trash 済みで除外対象になった asset は再適用しない。
+    - 日常での使い方: score review で threshold を確認した後、threshold 以下の asset を Review Album へ送り、人手で最終確認したいときに回す。
+    - 対象: 直近の `score` で保存された `score_result`。すでに trash 済みの asset や、すでに Review Album へ送付済みの asset は再適用しない。
 
 ## 現在の制約
 
@@ -49,6 +49,7 @@
 
 - 必須: `SMART_RANKER_IMMICH_API_KEY`
 - 必須: `SMART_RANKER_IMMICH_USER_ID`
+- 必須: `SMART_RANKER_REVIEW_ALBUM_ID` (`apply` の送付先 Album ID)
 - 任意: `SMART_RANKER_PORT`
 - 任意: `SMART_RANKER_REVIEW_THRESHOLD`
 
@@ -132,7 +133,7 @@ http://127.0.0.1:8010/
 - `Smart Ranker Console` が表示される
 - `Person Group` に seed 済み JSON が入る
 - `Categories & Routing` に categories と routingRules の JSON が入る
-- `Policies` に trash threshold policy が出る
+- `Policies` に review threshold policy が出る
 - `Jobs & Models` に `learn`, `score`, `apply` の schedules と model snapshot 一覧が出る
 - `Event Ledger` に `Signals`, `Score Review`, `Apply Log` が出る
 - `score review` nav から独立一覧ページへ移動できる

@@ -270,7 +270,7 @@ def build_default_master_data(
         "policies": [
             {
                 "policyKey": DEFAULT_REVIEW_POLICY_KEY,
-                "displayName": "Trash Threshold Policy",
+                "displayName": "Review Threshold Policy",
                 "executionMode": "manual",
                 "display": {
                     "reviewThreshold": review_threshold,
