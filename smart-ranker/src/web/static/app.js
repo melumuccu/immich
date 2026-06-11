@@ -362,7 +362,13 @@ const formatCount = (value) => new Intl.NumberFormat("ja-JP").format(Number(valu
 
 const formatScore = (value) => {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(2) : "n/a";
+  if (!Number.isFinite(numeric)) {
+    return "n/a";
+  }
+
+  const scaled = 100;
+  const ceiled = Math.ceil((numeric * scaled) - 1e-9) / scaled;
+  return ceiled.toFixed(2);
 };
 
 const normalizeScoreReviewSortOrder = (value) => (String(value ?? "").toLowerCase() === "desc"
@@ -1254,6 +1260,27 @@ const renderDerivedLists = () => {
     (item) => `#${item.rank_index} / ${item.immich_asset_id} / ${formatScore(item.total_score)}`,
   );
   renderList("ledger-actions", state.settings.ledger.actionExecutionLogs, (item) => `${item.action_type} / ${item.status}`);
+
+  const exclusionList = document.getElementById("ledger-exclusions");
+  if (exclusionList) {
+    const activeExclusions = [...(state.settings.ledger.applyExclusionAssets ?? [])]
+      .filter((item) => Number(item.active) === 1)
+      .sort((left, right) => compareIsoTimestamp(left.excluded_at, right.excluded_at));
+
+    exclusionList.innerHTML = activeExclusions.length
+      ? activeExclusions.map((item) => `
+        <li>
+          <span>${escapeHtml(String(item.immich_asset_id ?? "asset"))}</span>
+          <button
+            type="button"
+            class="button-secondary"
+            data-action="clear-apply-exclusion"
+            data-asset-id="${escapeHtml(String(item.immich_asset_id ?? ""))}"
+          >allow reapply</button>
+        </li>
+      `).join("")
+      : '<li class="subtle">no active reapply suppression</li>';
+  }
 };
 
 const renderScoreReviewPage = () => {
@@ -2007,11 +2034,51 @@ const installJobButtons = () => {
   }
 };
 
+const installLedgerHandlers = () => {
+  const container = document.querySelector(".panel-grid");
+  if (!container) {
+    return;
+  }
+
+  container.addEventListener("click", async (event) => {
+    const control = event.target.closest("[data-action]");
+    if (!control || control.dataset.action !== "clear-apply-exclusion") {
+      return;
+    }
+
+    const assetId = String(control.dataset.assetId || "").trim();
+    if (!assetId) {
+      return;
+    }
+
+    try {
+      control.disabled = true;
+      setStatus("global-status", `clearing reapply suppression for ${assetId}...`);
+      const payload = await fetchJson(`/api/apply-exclusions/${encodeURIComponent(assetId)}/clear`, {
+        method: "POST",
+      });
+      const clearedCount = Number(payload.clearedCount) || 0;
+      setStatus(
+        "global-status",
+        clearedCount
+          ? `reapply enabled for ${assetId}`
+          : `no active reapply suppression for ${assetId}`,
+      );
+      await refresh();
+    } catch (error) {
+      setStatus("global-status", error instanceof Error ? error.message : String(error), true);
+    } finally {
+      control.disabled = false;
+    }
+  });
+};
+
 installJobButtons();
 installSaveButtons();
 installSeedButton();
 installPersonGroupHandlers();
 installCategoriesRoutingHandlers();
+installLedgerHandlers();
 installScoreReviewHandlers();
 startLiveReload();
 refresh().catch((error) => {

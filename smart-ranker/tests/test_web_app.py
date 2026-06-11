@@ -529,6 +529,84 @@ class WebAppTest(unittest.TestCase):
             self.assertEqual(1, len(ledger["scoreResults"]))
             self.assertEqual(1, len(ledger["applyExclusionAssets"]))
 
+    def test_apply_exclusion_can_be_cleared_for_reapply(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bootstrap_result = bootstrap_storage(state_dir=Path(temp_dir) / "state")
+            repository = StorageRepository(bootstrap_result.paths.db_path)
+            repository.insert_profile(profile_id="profile-1", immich_user_id="immich-user-1")
+            repository.insert_action_policy(
+                policy_id="policy-1",
+                profile_id="profile-1",
+                policy_key="review",
+                display_name="Review Policy",
+                execution_mode="manual",
+            )
+            repository.insert_action_destination(
+                destination_id="dest-1",
+                profile_id="profile-1",
+                destination_key="review-album",
+                destination_type="album",
+                immich_resource_id="album-1",
+            )
+            repository.insert_inference_trace(
+                InferenceTraceRecord(
+                    id="trace-1",
+                    profile_id="profile-1",
+                    immich_asset_id="asset-1",
+                    trigger_type="manual",
+                    execution_mode="manual",
+                    candidate_categories=["document"],
+                    score={"generic": 0.2},
+                    final_score=0.2,
+                    threshold_snapshot={"review_threshold": 0.21},
+                    protected=False,
+                    occurred_at="2026-05-09T12:00:00Z",
+                )
+            )
+            repository.insert_action_execution_log(
+                ActionExecutionLogRecord(
+                    id="log-1",
+                    profile_id="profile-1",
+                    inference_trace_id="trace-1",
+                    action_policy_id="policy-1",
+                    destination_id="dest-1",
+                    immich_asset_id="asset-1",
+                    action_type="add_to_album",
+                    execution_mode="manual",
+                    dry_run=False,
+                    status="executed",
+                    request={"albumId": "album-1", "assetIds": ["asset-1"]},
+                    response={"id": "asset-1", "success": True},
+                    error_message=None,
+                    executed_at="2026-05-09T12:02:00Z",
+                )
+            )
+            repository.insert_apply_exclusion_asset(
+                ApplyExclusionAssetRecord(
+                    id="exclude-1",
+                    profile_id="profile-1",
+                    immich_asset_id="asset-1",
+                    score_run_id="score-run-1",
+                    action_log_id="log-1",
+                    reason="review-album",
+                    excluded_at="2026-05-09T12:02:00Z",
+                )
+            )
+
+            app = create_app(state_dir=Path(temp_dir) / "state", profile_id="profile-1")
+            client = TestClient(app)
+
+            response = client.post("/api/apply-exclusions/asset-1/clear")
+
+            self.assertEqual(200, response.status_code)
+            self.assertEqual("asset-1", response.json()["assetId"])
+            self.assertEqual(1, response.json()["clearedCount"])
+            self.assertEqual([], response.json()["activeAssetIds"])
+            self.assertEqual(set(), repository.list_active_apply_exclusion_asset_ids("profile-1"))
+
+            ledger = client.get("/api/event-ledger").json()
+            self.assertEqual(0, ledger["applyExclusionAssets"][0]["active"])
+
     def test_score_review_api_paginates_and_thumbnail_proxy_uses_injected_client(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state_dir = Path(temp_dir) / "state"

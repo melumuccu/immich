@@ -967,6 +967,18 @@ class StorageRepository:
             ).fetchall()
         return {str(row["immich_asset_id"]) for row in rows if row["immich_asset_id"]}
 
+    def deactivate_apply_exclusion_asset(self, profile_id: str, immich_asset_id: str) -> int:
+        with self._open() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE apply_exclusion_asset
+                SET active = 0
+                WHERE profile_id = ? AND immich_asset_id = ? AND active = 1
+                """,
+                (profile_id, immich_asset_id),
+            )
+        return int(cursor.rowcount)
+
     def insert_score_run(self, record: ScoreRunRecord) -> None:
         with self._open() as connection:
             connection.execute(

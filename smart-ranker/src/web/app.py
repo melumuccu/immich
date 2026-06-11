@@ -539,4 +539,20 @@ def create_app(
             "applyExclusionAssets": [dict(row) for row in exclusion_rows],
         }
 
+    @app.post("/api/apply-exclusions/{asset_id}/clear")
+    def clear_apply_exclusion(asset_id: str) -> dict:
+        normalized_asset_id = str(asset_id).strip()
+        if not normalized_asset_id:
+            raise HTTPException(status_code=400, detail="asset_id is required")
+
+        cleared_count = app.state.repository.deactivate_apply_exclusion_asset(
+            app.state.profile_id,
+            normalized_asset_id,
+        )
+        return {
+            "assetId": normalized_asset_id,
+            "clearedCount": cleared_count,
+            "activeAssetIds": sorted(app.state.repository.list_active_apply_exclusion_asset_ids(app.state.profile_id)),
+        }
+
     return app
