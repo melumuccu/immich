@@ -51,26 +51,53 @@ services:
       - ${POSTGRES_DATA_PATH}:/var/lib/postgresql/data
     restart: unless-stopped
 
-  smart-ranker:
-    container_name: smart_ranker
+  immich-backup:
+    container_name: immich_backup
     build:
-      context: ./smart-ranker
-      target: dev
+      context: ./immich-backup
+      dockerfile: Dockerfile
     environment:
-      SMART_RANKER_STATE_DIR: /data/state
-      SMART_RANKER_LIVE_RELOAD: 1
-      SMART_RANKER_IMMICH_BASE_URL: http://immich-server:2283
-      SMART_RANKER_IMMICH_API_KEY: ${SMART_RANKER_IMMICH_API_KEY:-}
-      SMART_RANKER_IMMICH_DB_DSN: postgresql://${DB_USERNAME}:${DB_PASSWORD}@database:5432/${DB_DATABASE_NAME}
-      SMART_RANKER_IMMICH_USER_ID: ${SMART_RANKER_IMMICH_USER_ID:-}
-      SMART_RANKER_REVIEW_ALBUM_ID: ${SMART_RANKER_REVIEW_ALBUM_ID:-}
-      SMART_RANKER_REVIEW_THRESHOLD: ${SMART_RANKER_REVIEW_THRESHOLD:-0.5}
-    ports:
-      - 127.0.0.1:${SMART_RANKER_PORT:-8010}:8010
+      TZ: ${TZ}
+      RCLONE_CONFIG_B2_TYPE: b2
+      RCLONE_CONFIG_B2_ACCOUNT: ${B2_KEY_ID}
+      RCLONE_CONFIG_B2_KEY: ${B2_APPLICATION_KEY}
     volumes:
-      - ./smart-ranker:/app
-      - ./smart-ranker/var/local:/data/state
-    depends_on:
-      - immich-server
-      - database
-    restart: unless-stopped
+      - type: bind
+        source: ${LIBRARY_PATH}
+        target: /data/library
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${IMMICH_APP_PATH}
+        target: /data/settings
+        read_only: true
+        bind:
+          create_host_path: false
+    security_opt:
+      - no-new-privileges:true
+    restart: always
+
+  # smart-ranker:
+  #   container_name: smart_ranker
+  #   build:
+  #     context: ./smart-ranker
+  #     target: dev
+  #   environment:
+  #     SMART_RANKER_STATE_DIR: /data/state
+  #     SMART_RANKER_LIVE_RELOAD: 1
+  #     SMART_RANKER_IMMICH_BASE_URL: http://immich-server:2283
+  #     SMART_RANKER_IMMICH_API_KEY: ${SMART_RANKER_IMMICH_API_KEY:-}
+  #     SMART_RANKER_IMMICH_DB_DSN: postgresql://${DB_USERNAME}:${DB_PASSWORD}@database:5432/${DB_DATABASE_NAME}
+  #     SMART_RANKER_IMMICH_USER_ID: ${SMART_RANKER_IMMICH_USER_ID:-}
+  #     SMART_RANKER_REVIEW_ALBUM_ID: ${SMART_RANKER_REVIEW_ALBUM_ID:-}
+  #     SMART_RANKER_REVIEW_THRESHOLD: ${SMART_RANKER_REVIEW_THRESHOLD:-0.5}
+  #   ports:
+  #     - 127.0.0.1:${SMART_RANKER_PORT:-8010}:8010
+  #   volumes:
+  #     - ./smart-ranker:/app
+  #     - ./smart-ranker/var/local:/data/state
+  #   depends_on:
+  #     - immich-server
+  #     - database
+  #   restart: unless-stopped

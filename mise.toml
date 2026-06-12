@@ -9,3 +9,7 @@ run = "docker compose down"
 [tasks.update-immich]
 description = "Immich を最新バージョンに更新する"
 run = "docker compose pull && docker compose up -d"
+
+[tasks.restart]
+description = "fzf で起動中の開発用コンテナを 1 つ選び、再ビルドせずに再起動"
+run = "bash scripts/tasks/restart.sh"
