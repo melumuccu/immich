@@ -11,6 +11,7 @@
 ### 基本仕様
 
 - **実行環境**: Dockerコンテナ（Alpine Linuxベース、タイムゾーンは `Asia/Tokyo`）。
+- **サービス構成**: 同じ `immich-backup` ソースから、`immich-backup-koki` と `immich-backup-mie` を起動。
 - **スケジュール**: 毎日深夜 2:30（日本時間）に `cron` で自動実行。 (Dockerfile内で `cron` をセットアップ)
 - **同期の性質**: `rclone sync` による片方向同期（Immich側で削除されたファイルはB2側でも自動削除）。
 - **ポータビリティ**: ホスト側の `rclone.conf` は不使用。設定はすべて `.env`（環境変数）経由でコンテナへ注入。
@@ -29,10 +30,12 @@
 
 ホスト側の各データをコンテナ内の `/data` 配下に読み込み専用でマウント。
 
-| 対象データ          | ホスト側ソースパス（Mac環境）                    | コンテナ内マウントパス   |
-| ------------------- | ------------------------------------------------ | ------------------------ |
-| **koki 写真データ** | `/Volumes/1TB_Immich/immich-data/library/admin/` | `/data/library/admin:ro` |
-| **設定・DBダンプ**  | `/Users/fujisawakoki/immich-app`                 | `/data/settings:ro`      |
+| 対象データ               | ホスト側ソースパス（Mac環境） | コンテナ内マウントパス |
+| ------------------------ | ----------------------------- | ---------------------- |
+| **KOKI/MIE 写真データ**  | `${LIBRARY_PATH}`             | `/data/library:ro`     |
+| **設定・DBダンプ**       | `${IMMICH_APP_PATH}`          | `/data/settings:ro`    |
+
+同期対象は `.env` の `KOKI_BACKUP_*` / `MIE_BACKUP_*` で指定。
 
 ---
 
@@ -42,7 +45,8 @@
 
 以下の設定でバケットを個別作成。
 
-1. **`immich-koki`** （kokiの写真用）
+1. **`immich-koki`** （KOKIの写真用）
+1. **`immich-mie`** （MIEの写真用）
 1. **`immich-settings`** （構成ファイル・DBバックアップ用）
 
 - **共通オプション設定**:
@@ -78,16 +82,19 @@ docker compose up -d --build
 ### コンテナの再ビルド
 
 ```bash
-docker compose stop immich-backup && docker compose rm -f immich-backup && docker compose up -d --build immich-backup
+docker compose stop immich-backup-koki immich-backup-mie
+docker compose rm -f immich-backup-koki immich-backup-mie
+docker compose up -d --build immich-backup-koki immich-backup-mie
 
 ```
 
-### 即時テスト実行（手動強制実行）
+### 即時実行（手動強制実行）
 
-深夜のcronを待たずに、コンテナ内のスクリプトを直接叩いてテストを実行。
+深夜のcronを待たずに、コンテナ内のスクリプトを直接叩いてバックアップを実行。
 
 ```bash
-docker compose exec immich-backup /app/backup.sh
+docker compose exec immich-backup-koki /app/backup.sh
+docker compose exec immich-backup-mie /app/backup.sh
 
 ```
 
@@ -96,7 +103,7 @@ docker compose exec immich-backup /app/backup.sh
 同期の進捗、削除されたファイルのステータス（`Deleted`）などをリアルタイム監視。
 
 ```bash
-docker logs -f immich-backup
+docker compose logs -f immich-backup-koki immich-backup-mie
 
 ```
 

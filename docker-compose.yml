@@ -1,3 +1,32 @@
+x-immich-backup-env: &immich-backup-env
+  TZ: ${TZ}
+  RCLONE_CONFIG_B2_TYPE: b2
+  RCLONE_CONFIG_B2_ACCOUNT: ${B2_KEY_ID}
+  RCLONE_CONFIG_B2_KEY: ${B2_APPLICATION_KEY}
+
+x-immich-backup-volumes: &immich-backup-volumes
+  - type: bind
+    source: ${LIBRARY_PATH}
+    target: /data/library
+    read_only: true
+    bind:
+      create_host_path: false
+  - type: bind
+    source: ${IMMICH_APP_PATH}
+    target: /data/settings
+    read_only: true
+    bind:
+      create_host_path: false
+
+x-immich-backup-common: &immich-backup-common
+  build:
+    context: ./immich-backup
+    dockerfile: Dockerfile
+  volumes: *immich-backup-volumes
+  security_opt:
+    - no-new-privileges:true
+  restart: always
+
 services:
   immich-server:
     container_name: immich_server
@@ -51,32 +80,37 @@ services:
       - ${POSTGRES_DATA_PATH}:/var/lib/postgresql/data
     restart: unless-stopped
 
-  immich-backup:
-    container_name: immich_backup
-    build:
-      context: ./immich-backup
-      dockerfile: Dockerfile
+  immich-backup-koki:
+    <<: *immich-backup-common
+    container_name: immich_backup_koki
     environment:
-      TZ: ${TZ}
-      RCLONE_CONFIG_B2_TYPE: b2
-      RCLONE_CONFIG_B2_ACCOUNT: ${B2_KEY_ID}
-      RCLONE_CONFIG_B2_KEY: ${B2_APPLICATION_KEY}
-    volumes:
-      - type: bind
-        source: ${LIBRARY_PATH}
-        target: /data/library
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ${IMMICH_APP_PATH}
-        target: /data/settings
-        read_only: true
-        bind:
-          create_host_path: false
-    security_opt:
-      - no-new-privileges:true
-    restart: always
+      <<: *immich-backup-env
+      BACKUP_NAME: KOKI
+      BACKUP_TEST_ENABLED: ${KOKI_BACKUP_TEST_ENABLED:-false}
+      BACKUP_TEST_SOURCE: ${KOKI_BACKUP_TEST_SOURCE}
+      BACKUP_TEST_DEST: ${KOKI_BACKUP_TEST_DEST}
+      BACKUP_PRODUCTION_ENABLED: ${KOKI_BACKUP_PRODUCTION_ENABLED:-true}
+      BACKUP_PRODUCTION_SOURCE: ${KOKI_BACKUP_PRODUCTION_SOURCE}
+      BACKUP_PRODUCTION_DEST: ${KOKI_BACKUP_PRODUCTION_DEST}
+      BACKUP_SETTINGS_ENABLED: ${KOKI_BACKUP_SETTINGS_ENABLED:-true}
+      BACKUP_SETTINGS_SOURCE: ${KOKI_BACKUP_SETTINGS_SOURCE}
+      BACKUP_SETTINGS_DEST: ${KOKI_BACKUP_SETTINGS_DEST}
+
+  immich-backup-mie:
+    <<: *immich-backup-common
+    container_name: immich_backup_mie
+    environment:
+      <<: *immich-backup-env
+      BACKUP_NAME: MIE
+      BACKUP_TEST_ENABLED: ${MIE_BACKUP_TEST_ENABLED:-false}
+      BACKUP_TEST_SOURCE: ${MIE_BACKUP_TEST_SOURCE}
+      BACKUP_TEST_DEST: ${MIE_BACKUP_TEST_DEST}
+      BACKUP_PRODUCTION_ENABLED: ${MIE_BACKUP_PRODUCTION_ENABLED:-true}
+      BACKUP_PRODUCTION_SOURCE: ${MIE_BACKUP_PRODUCTION_SOURCE}
+      BACKUP_PRODUCTION_DEST: ${MIE_BACKUP_PRODUCTION_DEST}
+      BACKUP_SETTINGS_ENABLED: ${MIE_BACKUP_SETTINGS_ENABLED:-false}
+      BACKUP_SETTINGS_SOURCE: ${MIE_BACKUP_SETTINGS_SOURCE:-}
+      BACKUP_SETTINGS_DEST: ${MIE_BACKUP_SETTINGS_DEST:-}
 
   immich-cleaner:
     container_name: immich_cleaner
