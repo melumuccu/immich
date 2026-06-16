@@ -1,12 +1,9 @@
 import { env } from '$env/dynamic/private';
 
 export const DEFAULT_KEYWORD_PRESETS = [
-  'blurry photo',
   'screenshot',
-  'receipt',
   'document',
-  'accidental photo',
-  'price tag',
+  'blurry photo',
   'too dark'
 ] as const;
 

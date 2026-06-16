@@ -83,6 +83,7 @@ services:
     build:
       context: .
       dockerfile: immich-cleaner/Dockerfile
+      target: dev
     environment:
       TZ: ${TZ}
       IMMICH_URL: http://immich-server:2283
@@ -90,12 +91,15 @@ services:
       IMMICH_CLEANER_DB_PATH: /app/data/immich-cleaner.sqlite3
       IMMICH_CLEANER_TRASH_METHOD: ${IMMICH_CLEANER_TRASH_METHOD:-DELETE}
       IMMICH_CLEANER_TRASH_FORCE: ${IMMICH_CLEANER_TRASH_FORCE:-false}
+      IMMICH_CLEANER_USE_POLLING: ${IMMICH_CLEANER_USE_POLLING:-false}
     ports:
       - 127.0.0.1:${IMMICH_CLEANER_PORT:-2293}:2293
     volumes:
+      - ./immich-cleaner/src:/workspace/immich-cleaner/src
       - ./immich-cleaner/var/local:/app/data
     depends_on:
-      - immich-server
+      immich-server:
+        condition: service_healthy
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped

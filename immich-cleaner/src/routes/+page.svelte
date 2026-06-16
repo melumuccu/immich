@@ -30,15 +30,6 @@
     trashMethod: string;
   };
 
-  const fallbackPresets = [
-    'blurry photo',
-    'screenshot',
-    'receipt',
-    'document',
-    'accidental photo',
-    'price tag',
-    'too dark'
-  ];
   const now = new Date();
   const defaultYear = String(now.getFullYear());
   const defaultMonth = String(now.getMonth() === 0 ? 12 : now.getMonth());
@@ -47,9 +38,9 @@
   );
   const monthOptions = Array.from({ length: 12 }, (_, index) => String(index + 1));
 
-  let presets = fallbackPresets;
+  let presets: string[] = [];
   let configured = true;
-  let query = fallbackPresets[0];
+  let query = '';
   let customQuery = '';
   let pageInput = '1';
   let pageSize = 100;
@@ -61,6 +52,7 @@
   let result: SearchPage | null = null;
   let loading = false;
   let trashing = false;
+  let configLoadFailed = false;
   let errorMessage = '';
   let noticeMessage = '';
   let selectedAssetIds = new Set<string>();
@@ -86,16 +78,20 @@
 
   onMount(async () => {
     try {
+      configLoadFailed = false;
       const config = await requestJson<PublicConfig>('/api/config');
-      presets = config.presets.length > 0 ? config.presets : fallbackPresets;
-      query = presets[0] ?? query;
+      if (!config.presets.length) {
+        throw new Error('DEFAULT_KEYWORD_PRESETS を取得できませんでした');
+      }
+      presets = config.presets;
+      query = presets[0];
       searchSize = config.defaultSearchSize;
       configured = config.configured;
       if (configured) {
         await runSearch(query, 1);
       }
     } catch (error) {
-      configured = false;
+      configLoadFailed = true;
       errorMessage = error instanceof Error ? error.message : '設定を読み込めませんでした';
     }
   });
@@ -449,7 +445,7 @@
       {/if}
     </div>
 
-    {#if !configured}
+    {#if !configLoadFailed && !configured}
       <div class="error-box">IMMICH_URL と IMMICH_API_KEY を設定してください。</div>
     {/if}
 

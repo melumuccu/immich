@@ -10,6 +10,12 @@ Immich の Smart Search を使って、低重要度候補を確認しながら�
 - `IMMICH_CLEANER_TRASH_METHOD`: Immich の一括削除 API メソッド。既定は `DELETE`。
 - `IMMICH_CLEANER_TRASH_FORCE`: `DELETE` 時の `force`。既定は `false`。
 
+## IMMICH_API_KEY　必要権限
+
+- `asset.read`
+- `asset.view`
+- `asset.delete`
+
 ## ローカル開発
 
 ```bash
