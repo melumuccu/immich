@@ -24,6 +24,20 @@ Mac Studio 上で Immich を動かすための最小構成。保存先はハイ�
 
 ### セットアップ
 
+- クローン直後に tool と Git hook をセットアップする
+
+  ```bash
+  mise install
+  mise run hooks-install
+  ```
+
+- hook 設定や secret scan を手元で確認したい場合は以下を実行する
+
+  ```bash
+  mise run hooks-validate
+  mise run hooks-run
+  ```
+
 - [こちらを参照](docs/setup.md): `.env` の調整から起動まで
 
 ### 完全リセット

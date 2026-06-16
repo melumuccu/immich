@@ -1,6 +1,8 @@
 [tools]
 node = "24.12.0"
 pnpm = "10.14.0"
+gitleaks = "8.30.1"
+pre-commit = "4.6.0"
 
 [tasks.start]
 description = "Docker Compose で全コンテナを起動する"
@@ -25,3 +27,15 @@ run = "bash scripts/tasks/rebuild.sh"
 [tasks.rebuild-all]
 description = "Docker Compose の全コンテナを停止し、再ビルドして起動"
 run = "docker compose stop && docker compose rm -f && docker compose up -d --build"
+
+[tasks.hooks-validate]
+description = "pre-commit 設定ファイルを検証する"
+run = "pre-commit validate-config"
+
+[tasks.hooks-install]
+description = "pre-commit hook を Git hooks にインストールする"
+run = "pre-commit install"
+
+[tasks.hooks-run]
+description = "gitleaks で Git 管理下の内容をスキャンする"
+run = "gitleaks git . --redact --verbose"
