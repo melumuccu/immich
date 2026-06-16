@@ -13,6 +13,7 @@ Mac Studio 上で Immich を動かすための最小構成。保存先はハイ�
 
 - `.env.example`: `.env` のひな形
 - `docker-compose.yml`: SSD と外付け HDD を分離したハイブリッドマウント構成
+- `immich-cleaner/`: Smart Search で低重要度候補を確認する追加 UI
 
 ### 前提
 
@@ -40,3 +41,9 @@ Mac Studio 上で Immich を動かすための最小構成。保存先はハイ�
 ### Google Photos から Immich へ全量移行する手順
 
 - [こちらを参照](docs/copy-from-google-photo.md): Takeout 取り込み手順
+
+### Immich Cleaner
+
+- `.env` の `IMMICH_CLEANER_IMMICH_API_KEY` に Immich の API キーを設定
+- `mise run cleaner:up` で起動
+- <http://127.0.0.1:2293> を開く

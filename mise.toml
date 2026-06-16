@@ -1,3 +1,7 @@
+[tools]
+node = "24.12.0"
+pnpm = "10.14.0"
+
 [tasks.start]
 description = "Docker Compose で全コンテナを起動する"
 run = "docker compose up -d"
@@ -13,3 +17,11 @@ run = "docker compose pull && docker compose up -d"
 [tasks.restart]
 description = "fzf で起動中の開発用コンテナを 1 つ選び、再ビルドせずに再起動"
 run = "bash scripts/tasks/restart.sh"
+
+[tasks.rebuild]
+description = "fzf で起動中のコンテナを 1 つ選び、再ビルドして起動"
+run = "bash scripts/tasks/rebuild.sh"
+
+[tasks.rebuild-all]
+description = "Docker Compose の全コンテナを停止し、再ビルドして起動"
+run = "docker compose stop && docker compose rm -f && docker compose up -d --build"

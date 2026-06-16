@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+**/.DS_Store
+**/.svelte-kit
+**/__pycache__
+**/*.pyc
+**/.venv
+**/build
+**/node_modules
+**/var
+smart-ranker
+immich-backup
+docs

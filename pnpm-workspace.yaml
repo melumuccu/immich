@@ -1,0 +1,9 @@
+packages:
+  - immich-cleaner
+
+minimumReleaseAge: 10080
+strictDepBuilds: true
+blockExoticSubdeps: true
+trustPolicy: no-downgrade
+onlyBuiltDependencies:
+  - esbuild

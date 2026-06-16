@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+.env
+
+immich-cleaner/.svelte-kit/
+immich-cleaner/build/
+immich-cleaner/node_modules/
+immich-cleaner/var/*
+!immich-cleaner/var/.gitkeep
+!immich-cleaner/var/local/
+immich-cleaner/var/local/*
+!immich-cleaner/var/local/.gitkeep
