@@ -27,6 +27,28 @@ x-immich-backup-common: &immich-backup-common
     - no-new-privileges:true
   restart: always
 
+x-immich-cleaner-env: &immich-cleaner-env
+  TZ: ${TZ}
+  IMMICH_URL: http://immich-server:2283
+  IMMICH_CLEANER_TRASH_METHOD: ${IMMICH_CLEANER_TRASH_METHOD:-DELETE}
+  IMMICH_CLEANER_TRASH_FORCE: ${IMMICH_CLEANER_TRASH_FORCE:-false}
+  IMMICH_CLEANER_USE_POLLING: ${IMMICH_CLEANER_USE_POLLING:-false}
+
+x-immich-cleaner-common: &immich-cleaner-common
+  build:
+    context: .
+    dockerfile: immich-cleaner/Dockerfile
+    target: dev
+  volumes:
+    - ./immich-cleaner/src:/workspace/immich-cleaner/src
+    - ./immich-cleaner/var/local:/app/data
+  depends_on:
+    immich-server:
+      condition: service_healthy
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
 services:
   immich-server:
     container_name: immich_server
@@ -112,31 +134,25 @@ services:
       BACKUP_SETTINGS_SOURCE: ${MIE_BACKUP_SETTINGS_SOURCE:-}
       BACKUP_SETTINGS_DEST: ${MIE_BACKUP_SETTINGS_DEST:-}
 
-  immich-cleaner:
-    container_name: immich_cleaner
-    build:
-      context: .
-      dockerfile: immich-cleaner/Dockerfile
-      target: dev
+  immich-cleaner-koki:
+    <<: *immich-cleaner-common
+    container_name: immich_cleaner_koki
     environment:
-      TZ: ${TZ}
-      IMMICH_URL: http://immich-server:2283
-      IMMICH_API_KEY: ${IMMICH_CLEANER_IMMICH_API_KEY:-}
-      IMMICH_CLEANER_DB_PATH: /app/data/immich-cleaner.sqlite3
-      IMMICH_CLEANER_TRASH_METHOD: ${IMMICH_CLEANER_TRASH_METHOD:-DELETE}
-      IMMICH_CLEANER_TRASH_FORCE: ${IMMICH_CLEANER_TRASH_FORCE:-false}
-      IMMICH_CLEANER_USE_POLLING: ${IMMICH_CLEANER_USE_POLLING:-false}
+      <<: *immich-cleaner-env
+      IMMICH_API_KEY: ${IMMICH_CLEANER_KOKI_IMMICH_API_KEY:-}
+      IMMICH_CLEANER_DB_PATH: /app/data/immich-cleaner-koki.sqlite3
     ports:
-      - 127.0.0.1:${IMMICH_CLEANER_PORT:-2293}:2293
-    volumes:
-      - ./immich-cleaner/src:/workspace/immich-cleaner/src
-      - ./immich-cleaner/var/local:/app/data
-    depends_on:
-      immich-server:
-        condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
+      - 127.0.0.1:${IMMICH_CLEANER_KOKI_PORT:-2293}:2293
+
+  immich-cleaner-mie:
+    <<: *immich-cleaner-common
+    container_name: immich_cleaner_mie
+    environment:
+      <<: *immich-cleaner-env
+      IMMICH_API_KEY: ${IMMICH_CLEANER_MIE_IMMICH_API_KEY:-}
+      IMMICH_CLEANER_DB_PATH: /app/data/immich-cleaner-mie.sqlite3
+    ports:
+      - 127.0.0.1:${IMMICH_CLEANER_MIE_PORT:-2294}:2293
 
   # smart-ranker:
   #   container_name: smart_ranker
