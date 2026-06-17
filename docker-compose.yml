@@ -6,7 +6,7 @@ x-immich-backup-env: &immich-backup-env
 
 x-immich-backup-volumes: &immich-backup-volumes
   - type: bind
-    source: ${LIBRARY_PATH}
+    source: ${UPLOAD_LOCATION}/library
     target: /data/library
     read_only: true
     bind:
@@ -63,12 +63,15 @@ services:
     ports:
       - "2283:2283"
     volumes:
-      - ${UPLOAD_PATH}:/usr/src/app/upload/upload
-      - ${LIBRARY_PATH}:/usr/src/app/upload/library
-      - ${THUMBNAILS_PATH}:/usr/src/app/upload/thumbs
-      - ${PROFILE_PATH}:/usr/src/app/upload/profile
-      - ${VIDEO_CACHE_PATH}:/usr/src/app/upload/encoded-video
-      - ${UPLOAD_BACKUP_PATH}:/usr/src/app/upload/backups
+      - type: bind
+        source: ${UPLOAD_LOCATION}
+        target: /data
+        bind:
+          create_host_path: false
+      - ${THUMB_LOCATION}:/data/thumbs
+      - ${PROFILE_LOCATION}:/data/profile
+      - ${ENCODED_VIDEO_LOCATION}:/data/encoded-video
+      - ${BACKUP_LOCATION}:/data/backups
     depends_on:
       - redis
       - database
@@ -81,7 +84,7 @@ services:
     environment:
       TZ: ${TZ}
     volumes:
-      - ${ML_CACHE_PATH}:/cache
+      - ${ML_CACHE_LOCATION}:/cache
     restart: unless-stopped
 
   redis:
@@ -99,7 +102,7 @@ services:
       POSTGRES_INITDB_ARGS: --data-checksums
       TZ: ${TZ}
     volumes:
-      - ${POSTGRES_DATA_PATH}:/var/lib/postgresql/data
+      - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
     restart: unless-stopped
 
   immich-backup-koki:
