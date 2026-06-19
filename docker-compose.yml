@@ -146,7 +146,7 @@ services:
       IMMICH_API_KEY: ${IMMICH_CLEANER_KOKI_IMMICH_API_KEY:-}
       IMMICH_CLEANER_DB_PATH: /app/data/immich-cleaner-koki.sqlite3
     ports:
-      - 127.0.0.1:${IMMICH_CLEANER_KOKI_PORT:-2293}:2293
+      - "${IMMICH_CLEANER_KOKI_PORT:-2293}:2222"
 
   immich-cleaner-mie:
     <<: *immich-cleaner-common
@@ -156,7 +156,7 @@ services:
       IMMICH_API_KEY: ${IMMICH_CLEANER_MIE_IMMICH_API_KEY:-}
       IMMICH_CLEANER_DB_PATH: /app/data/immich-cleaner-mie.sqlite3
     ports:
-      - 127.0.0.1:${IMMICH_CLEANER_MIE_PORT:-2294}:2293
+      - "${IMMICH_CLEANER_MIE_PORT:-2294}:2222"
 
   # smart-ranker:
   #   container_name: smart_ranker
