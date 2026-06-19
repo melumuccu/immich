@@ -1,3 +1,4 @@
+# see: https://docs.immich.app/install/docker-compose
 x-immich-backup-env: &immich-backup-env
   TZ: ${TZ}
   RCLONE_CONFIG_B2_TYPE: b2
