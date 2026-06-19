@@ -44,7 +44,7 @@
   let customQuery = '';
   let pageInput = '1';
   let pageSize = 100;
-  let threshold = 0.75;
+  let threshold = '';
   let includeExcluded = false;
   let selectedYear = defaultYear;
   let selectedMonth = defaultMonth;
@@ -56,6 +56,7 @@
   let errorMessage = '';
   let noticeMessage = '';
   let selectedAssetIds = new Set<string>();
+  let thresholdValue: number | null = null;
   let contextMenu:
     | {
         visible: true;
@@ -75,6 +76,7 @@
   $: totalItems = result?.totalItems ?? 0;
   $: pageInput = String(currentPage);
   $: selectedCount = selectedAssetIds.size;
+  $: thresholdValue = parseThresholdInput(threshold);
 
   onMount(async () => {
     try {
@@ -105,6 +107,7 @@
 
     if (normalizedQuery !== query) {
       selectedAssetIds = new Set();
+      threshold = '';
     }
     query = normalizedQuery;
     loading = true;
@@ -174,12 +177,12 @@
   }
 
   async function trashByThreshold() {
-    if (!result || trashing) {
+    if (!result || trashing || thresholdValue === null) {
       return;
     }
 
     const confirmed = window.confirm(
-      `「${query}」の検索結果から score ${threshold} 以上の画像をゴミ箱に移動します。`
+      `「${query}」の検索結果から score ${thresholdValue} 以上の画像をゴミ箱に移動します。`
     );
     if (!confirmed) {
       return;
@@ -199,7 +202,7 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           query,
-          threshold,
+          threshold: thresholdValue,
           size: searchSize,
           year: selectedYear || null,
           month: selectedYear && selectedMonth ? selectedMonth : null
@@ -307,6 +310,19 @@
     if (event.key === 'Escape') {
       closeContextMenu();
     }
+  }
+
+  function parseThresholdInput(value: string): number | null {
+    if (!value.trim()) {
+      return null;
+    }
+
+    const parsed = Number.parseFloat(value);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+      return null;
+    }
+
+    return parsed;
   }
 
   async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -422,7 +438,7 @@
 
     <section class="control-group">
       <div class="control-title">アクション</div>
-      <button class="danger-button" type="button" disabled={!result || loading || trashing} on:click={trashByThreshold}>
+      <button class="danger-button" type="button" disabled={!result || loading || trashing || thresholdValue === null} on:click={trashByThreshold}>
         閾値以上をゴミ箱へ
       </button>
       <button class="danger-button" type="button" disabled={selectedCount === 0 || loading || trashing} on:click={trashSelectedAssets}>
