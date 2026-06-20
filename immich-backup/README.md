@@ -12,7 +12,7 @@
 
 - **実行環境**: Dockerコンテナ（Alpine Linuxベース、タイムゾーンは `Asia/Tokyo`）。
 - **サービス構成**: 同じ `immich-backup` ソースから、`immich-backup-koki`、`immich-backup-mie`、`immich-backup-settings` を起動。
-- **スケジュール**: 毎日深夜 2:30（日本時間）に `cron` で自動実行。 (Dockerfile内で `cron` をセットアップ)
+- **スケジュール**: `.env` の `*_BACKUP_CRON` で指定。起動時にコンテナ内の `cron` へ反映。
 - **同期の性質**: `rclone sync` による片方向同期（Immich側で削除されたファイルはB2側でも自動削除）。
 - **ポータビリティ**: ホスト側の `rclone.conf` は不使用。設定はすべて `.env`（環境変数）経由でコンテナへ注入。
 
@@ -38,6 +38,14 @@
 `immich-backup-koki` と `immich-backup-mie` は `/data/library` のみをマウントする。`immich-backup-settings` は `/data/settings` のみをマウントする。
 
 同期対象は `.env` の `KOKI_BACKUP_*` / `MIE_BACKUP_*` / `SETTINGS_BACKUP_*` で指定。
+
+### スケジュール
+
+| サービス | 環境変数 | 既定値 |
+| -------- | -------- | ------ |
+| `immich-backup-settings` | `SETTINGS_BACKUP_CRON` | `0 2 * * *` |
+| `immich-backup-koki` | `KOKI_BACKUP_CRON` | `30 2 * * *` |
+| `immich-backup-mie` | `MIE_BACKUP_CRON` | `0 3 * * *` |
 
 ---
 
