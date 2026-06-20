@@ -39,6 +39,17 @@
 
 同期対象は `.env` の `KOKI_BACKUP_*` / `MIE_BACKUP_*` / `SETTINGS_BACKUP_*` で指定。
 
+### バックアップモード
+
+KOKI/MIE の写真データは `*_BACKUP_MODE` で実行対象を選ぶ。
+
+| 値 | 使用する同期元・同期先 |
+| -- | ---------------------- |
+| `test` | `*_BACKUP_TEST_SOURCE` / `*_BACKUP_TEST_DEST` |
+| `prod` | `*_BACKUP_PROD_SOURCE` / `*_BACKUP_PROD_DEST` |
+
+`immich-backup-settings` は settings 専用。`*_BACKUP_MODE` は使わない。
+
 ### スケジュール
 
 | サービス | 環境変数 | 既定値 |
