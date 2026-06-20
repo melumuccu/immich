@@ -21,6 +21,7 @@ BACKUP_PROFILE_DEST="${BACKUP_PROFILE_DEST:-}"
 
 RCLONE_FLAGS=(
   --verbose
+  --delete-after
 )
 
 log() {

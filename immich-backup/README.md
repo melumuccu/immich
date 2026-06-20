@@ -13,7 +13,7 @@
 - **実行環境**: Dockerコンテナ（Alpine Linuxベース、タイムゾーンは `Asia/Tokyo`）。
 - **サービス構成**: 同じ `immich-backup` ソースから、`immich-backup-koki`、`immich-backup-mie`、`immich-backup-essential` を起動。
 - **スケジュール**: `.env` の `*_BACKUP_CRON` で指定。起動時にコンテナ内の `cron` へ反映。
-- **同期の性質**: `rclone sync` による片方向同期（Immich側で削除されたファイルはB2側でも自動削除）。
+- **同期の性質**: `rclone sync --delete-after` による片方向同期（Immich側で削除されたファイルはB2側でも自動削除）。
 - **ポータビリティ**: ホスト側の `rclone.conf` は不使用。設定はすべて `.env`（環境変数）経由でコンテナへ注入。
 
 ### セキュリティ・安全対策
