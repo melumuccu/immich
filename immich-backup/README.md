@@ -2,7 +2,7 @@
 
 ## 1. 概要
 
-セルフホストしている写真管理アプリ「Immich」のデータおよび設定ファイルを、オブジェクトストレージ「Backblaze B2」へ毎日深夜に自動同期（`rclone sync`）するDockerコンテナ環境の構築手順。
+セルフホストしている写真管理アプリ「Immich」の復旧に必須なデータを、オブジェクトストレージ「Backblaze B2」へ毎日深夜に自動同期（`rclone sync`）するDockerコンテナ環境の構築手順。
 
 ---
 
@@ -11,7 +11,7 @@
 ### 基本仕様
 
 - **実行環境**: Dockerコンテナ（Alpine Linuxベース、タイムゾーンは `Asia/Tokyo`）。
-- **サービス構成**: 同じ `immich-backup` ソースから、`immich-backup-koki`、`immich-backup-mie`、`immich-backup-settings` を起動。
+- **サービス構成**: 同じ `immich-backup` ソースから、`immich-backup-koki`、`immich-backup-mie`、`immich-backup-essential` を起動。
 - **スケジュール**: `.env` の `*_BACKUP_CRON` で指定。起動時にコンテナ内の `cron` へ反映。
 - **同期の性質**: `rclone sync` による片方向同期（Immich側で削除されたファイルはB2側でも自動削除）。
 - **ポータビリティ**: ホスト側の `rclone.conf` は不使用。設定はすべて `.env`（環境変数）経由でコンテナへ注入。
@@ -30,14 +30,18 @@
 
 ホスト側の各データをコンテナ内の `/data` 配下に読み込み専用でマウント。
 
-| 対象データ               | ホスト側ソースパス（Mac環境） | コンテナ内マウントパス |
-| ------------------------ | ----------------------------- | ---------------------- |
-| **KOKI/MIE 写真データ**  | `${UPLOAD_LOCATION}/library`  | `/data/library:ro`     |
-| **設定・DBダンプ**       | `${IMMICH_APP_PATH}`          | `/data/settings:ro`    |
+| 対象データ | ホスト側ソースパス（Mac環境） | コンテナ内マウントパス |
+| ---------- | ----------------------------- | ---------------------- |
+| KOKI/MIE オリジナルアセット | `${UPLOAD_LOCATION}/library` | `/data/library:ro` |
+| アップロード中または未整理のオリジナルアセット | `${UPLOAD_LOCATION}/upload` | `/data/upload:ro` |
+| プロフィール画像 | `${PROFILE_LOCATION}` | `/data/profile:ro` |
+| データベースダンプ | `${BACKUP_LOCATION}` | `/data/backups:ro` |
 
-`immich-backup-koki` と `immich-backup-mie` は `/data/library` のみをマウントする。`immich-backup-settings` は `/data/settings` のみをマウントする。
+`immich-backup-koki` と `immich-backup-mie` は `/data/library` のみをマウントする。`immich-backup-essential` は `/data/backups`、`/data/upload`、`/data/profile` のみをマウントする。
 
-同期対象は `.env` の `KOKI_BACKUP_*` / `MIE_BACKUP_*` / `SETTINGS_BACKUP_*` で指定。
+同期対象は `.env` の `KOKI_BACKUP_*` / `MIE_BACKUP_*` / `ESSENTIAL_BACKUP_*` で指定。
+
+サムネイル画像とエンコード済み動画は再生成可能なデータ。`thumbs` と `encoded-video` はバックアップ対象外。
 
 ### バックアップモード
 
@@ -48,13 +52,13 @@ KOKI/MIE の写真データは `*_BACKUP_MODE` で実行対象を選ぶ。
 | `test` | `*_BACKUP_TEST_SOURCE` / `*_BACKUP_TEST_DEST` |
 | `prod` | `*_BACKUP_PROD_SOURCE` / `*_BACKUP_PROD_DEST` |
 
-`immich-backup-settings` は settings 専用。`*_BACKUP_MODE` は使わない。
+`immich-backup-essential` は `ESSENTIAL_BACKUP_TARGETS` で `backups,upload,profile` を同期する。`*_BACKUP_MODE` は使わない。
 
 ### スケジュール
 
 | サービス | 環境変数 | 既定値 |
 | -------- | -------- | ------ |
-| `immich-backup-settings` | `SETTINGS_BACKUP_CRON` | `0 2 * * *` |
+| `immich-backup-essential` | `ESSENTIAL_BACKUP_CRON` | `0 2 * * *` |
 | `immich-backup-koki` | `KOKI_BACKUP_CRON` | `30 2 * * *` |
 | `immich-backup-mie` | `MIE_BACKUP_CRON` | `0 3 * * *` |
 
@@ -68,7 +72,7 @@ KOKI/MIE の写真データは `*_BACKUP_MODE` で実行対象を選ぶ。
 
 1. **`immich-koki`** （KOKIの写真用）
 1. **`immich-mie`** （MIEの写真用）
-1. **`immich-settings`** （構成ファイル・DBバックアップ用）
+1. **`immich-settings`** （`backups`、`upload`、`profile` 用）
 
 - **共通オプション設定**:
 - Files in Bucket are: `Private`
@@ -103,9 +107,9 @@ docker compose up -d --build
 ### コンテナの再ビルド
 
 ```bash
-docker compose stop immich-backup-koki immich-backup-mie immich-backup-settings
-docker compose rm -f immich-backup-koki immich-backup-mie immich-backup-settings
-docker compose up -d --build immich-backup-koki immich-backup-mie immich-backup-settings
+docker compose stop immich-backup-koki immich-backup-mie immich-backup-essential
+docker compose rm -f immich-backup-koki immich-backup-mie immich-backup-essential
+docker compose up -d --build immich-backup-koki immich-backup-mie immich-backup-essential
 
 ```
 
@@ -116,7 +120,7 @@ docker compose up -d --build immich-backup-koki immich-backup-mie immich-backup-
 ```bash
 docker compose exec immich-backup-koki /app/backup.sh
 docker compose exec immich-backup-mie /app/backup.sh
-docker compose exec immich-backup-settings /app/backup.sh
+docker compose exec immich-backup-essential /app/backup.sh
 
 ```
 
@@ -125,7 +129,7 @@ docker compose exec immich-backup-settings /app/backup.sh
 同期の進捗、削除されたファイルのステータス（`Deleted`）などをリアルタイム監視。
 
 ```bash
-docker compose logs -f immich-backup-koki immich-backup-mie immich-backup-settings
+docker compose logs -f immich-backup-koki immich-backup-mie immich-backup-essential
 
 ```
 

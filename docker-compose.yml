@@ -13,10 +13,22 @@ x-immich-backup-library-volumes: &immich-backup-library-volumes
     bind:
       create_host_path: false
 
-x-immich-backup-settings-volumes: &immich-backup-settings-volumes
+x-immich-backup-essential-volumes: &immich-backup-essential-volumes
   - type: bind
-    source: ${IMMICH_APP_PATH}
-    target: /data/settings
+    source: ${BACKUP_LOCATION}
+    target: /data/backups
+    read_only: true
+    bind:
+      create_host_path: false
+  - type: bind
+    source: ${UPLOAD_LOCATION}/upload
+    target: /data/upload
+    read_only: true
+    bind:
+      create_host_path: false
+  - type: bind
+    source: ${PROFILE_LOCATION}
+    target: /data/profile
     read_only: true
     bind:
       create_host_path: false
@@ -115,7 +127,7 @@ services:
       <<: *immich-backup-env
       BACKUP_NAME: KOKI
       BACKUP_CRON: "${KOKI_BACKUP_CRON:-30 2 * * *}"
-      BACKUP_MODE: ${KOKI_BACKUP_MODE:-prod}
+      BACKUP_TARGETS: ${KOKI_BACKUP_MODE:-prod}
       BACKUP_TEST_SOURCE: ${KOKI_BACKUP_TEST_SOURCE}
       BACKUP_TEST_DEST: ${KOKI_BACKUP_TEST_DEST}
       BACKUP_PROD_SOURCE: ${KOKI_BACKUP_PROD_SOURCE}
@@ -129,23 +141,27 @@ services:
       <<: *immich-backup-env
       BACKUP_NAME: MIE
       BACKUP_CRON: "${MIE_BACKUP_CRON:-0 3 * * *}"
-      BACKUP_MODE: ${MIE_BACKUP_MODE:-prod}
+      BACKUP_TARGETS: ${MIE_BACKUP_MODE:-prod}
       BACKUP_TEST_SOURCE: ${MIE_BACKUP_TEST_SOURCE}
       BACKUP_TEST_DEST: ${MIE_BACKUP_TEST_DEST}
       BACKUP_PROD_SOURCE: ${MIE_BACKUP_PROD_SOURCE}
       BACKUP_PROD_DEST: ${MIE_BACKUP_PROD_DEST}
 
-  immich-backup-settings:
+  immich-backup-essential:
     <<: *immich-backup-common
-    container_name: immich_backup_settings
-    volumes: *immich-backup-settings-volumes
+    container_name: immich_backup_essential
+    volumes: *immich-backup-essential-volumes
     environment:
       <<: *immich-backup-env
-      BACKUP_NAME: SETTINGS
-      BACKUP_CRON: "${SETTINGS_BACKUP_CRON:-0 2 * * *}"
-      BACKUP_SETTINGS_ENABLED: ${SETTINGS_BACKUP_ENABLED:-true}
-      BACKUP_SETTINGS_SOURCE: ${SETTINGS_BACKUP_SOURCE}
-      BACKUP_SETTINGS_DEST: ${SETTINGS_BACKUP_DEST}
+      BACKUP_NAME: ESSENTIAL
+      BACKUP_CRON: "${ESSENTIAL_BACKUP_CRON:-0 2 * * *}"
+      BACKUP_TARGETS: "${ESSENTIAL_BACKUP_TARGETS:-backups,upload,profile}"
+      BACKUP_BACKUPS_SOURCE: ${ESSENTIAL_BACKUP_BACKUPS_SOURCE:-/data/backups}
+      BACKUP_BACKUPS_DEST: ${ESSENTIAL_BACKUP_BACKUPS_DEST}
+      BACKUP_UPLOAD_SOURCE: ${ESSENTIAL_BACKUP_UPLOAD_SOURCE:-/data/upload}
+      BACKUP_UPLOAD_DEST: ${ESSENTIAL_BACKUP_UPLOAD_DEST}
+      BACKUP_PROFILE_SOURCE: ${ESSENTIAL_BACKUP_PROFILE_SOURCE:-/data/profile}
+      BACKUP_PROFILE_DEST: ${ESSENTIAL_BACKUP_PROFILE_DEST}
 
   immich-cleaner-koki:
     <<: *immich-cleaner-common
