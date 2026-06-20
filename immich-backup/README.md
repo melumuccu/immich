@@ -11,7 +11,7 @@
 ### 基本仕様
 
 - **実行環境**: Dockerコンテナ（Alpine Linuxベース、タイムゾーンは `Asia/Tokyo`）。
-- **サービス構成**: 同じ `immich-backup` ソースから、`immich-backup-koki` と `immich-backup-mie` を起動。
+- **サービス構成**: 同じ `immich-backup` ソースから、`immich-backup-koki`、`immich-backup-mie`、`immich-backup-settings` を起動。
 - **スケジュール**: 毎日深夜 2:30（日本時間）に `cron` で自動実行。 (Dockerfile内で `cron` をセットアップ)
 - **同期の性質**: `rclone sync` による片方向同期（Immich側で削除されたファイルはB2側でも自動削除）。
 - **ポータビリティ**: ホスト側の `rclone.conf` は不使用。設定はすべて `.env`（環境変数）経由でコンテナへ注入。
@@ -32,10 +32,12 @@
 
 | 対象データ               | ホスト側ソースパス（Mac環境） | コンテナ内マウントパス |
 | ------------------------ | ----------------------------- | ---------------------- |
-| **KOKI/MIE 写真データ**  | `${LIBRARY_PATH}`             | `/data/library:ro`     |
+| **KOKI/MIE 写真データ**  | `${UPLOAD_LOCATION}/library`  | `/data/library:ro`     |
 | **設定・DBダンプ**       | `${IMMICH_APP_PATH}`          | `/data/settings:ro`    |
 
-同期対象は `.env` の `KOKI_BACKUP_*` / `MIE_BACKUP_*` で指定。
+`immich-backup-koki` と `immich-backup-mie` は `/data/library` のみをマウントする。`immich-backup-settings` は `/data/settings` のみをマウントする。
+
+同期対象は `.env` の `KOKI_BACKUP_*` / `MIE_BACKUP_*` / `SETTINGS_BACKUP_*` で指定。
 
 ---
 
@@ -82,9 +84,9 @@ docker compose up -d --build
 ### コンテナの再ビルド
 
 ```bash
-docker compose stop immich-backup-koki immich-backup-mie
-docker compose rm -f immich-backup-koki immich-backup-mie
-docker compose up -d --build immich-backup-koki immich-backup-mie
+docker compose stop immich-backup-koki immich-backup-mie immich-backup-settings
+docker compose rm -f immich-backup-koki immich-backup-mie immich-backup-settings
+docker compose up -d --build immich-backup-koki immich-backup-mie immich-backup-settings
 
 ```
 
@@ -95,6 +97,7 @@ docker compose up -d --build immich-backup-koki immich-backup-mie
 ```bash
 docker compose exec immich-backup-koki /app/backup.sh
 docker compose exec immich-backup-mie /app/backup.sh
+docker compose exec immich-backup-settings /app/backup.sh
 
 ```
 
@@ -103,7 +106,7 @@ docker compose exec immich-backup-mie /app/backup.sh
 同期の進捗、削除されたファイルのステータス（`Deleted`）などをリアルタイム監視。
 
 ```bash
-docker compose logs -f immich-backup-koki immich-backup-mie
+docker compose logs -f immich-backup-koki immich-backup-mie immich-backup-settings
 
 ```
 
