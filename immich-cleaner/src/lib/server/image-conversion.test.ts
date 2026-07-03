@@ -6,6 +6,8 @@ describe('isHeicImage', () => {
   it('detects HEIC by content type', () => {
     expect(isHeicImage('image/heic', new Uint8Array())).toBe(true);
     expect(isHeicImage('image/heif; charset=binary', new Uint8Array())).toBe(true);
+    expect(isHeicImage('image/heic-sequence', new Uint8Array())).toBe(true);
+    expect(isHeicImage('image/heif-sequence', new Uint8Array())).toBe(true);
   });
 
   it('detects HEIC by the HEIF ftyp brand', () => {

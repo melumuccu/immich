@@ -7,6 +7,7 @@ import type { CleanerAsset, SearchPage, SmartSearchAsset, TrashResult } from './
 import { scoreForThreshold } from '$lib/score';
 
 const SEARCH_CACHE_MS = 5 * 60 * 1000;
+const ORIGINAL_DISPLAY_FORMAT_VERSION = 'jpeg-v1';
 
 type SearchCacheEntry = {
   expiresAt: number;
@@ -39,7 +40,7 @@ export async function searchCleanerAssets(input: {
     return {
       ...asset,
       thumbnailUrl: `/api/proxy/thumbnail/${encodeURIComponent(asset.id)}`,
-      originalUrl: `/api/proxy/original/${encodeURIComponent(asset.id)}`,
+      originalUrl: `/api/proxy/original/${encodeURIComponent(asset.id)}?display=${ORIGINAL_DISPLAY_FORMAT_VERSION}`,
       isExcluded: Boolean(exclusion),
       exclusionReason: exclusion?.reason ?? null
     };

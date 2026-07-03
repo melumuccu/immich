@@ -383,6 +383,7 @@
     const promise = (async () => {
       try {
         const response = await fetch(asset.originalUrl, {
+          cache: 'reload',
           headers: { accept: 'image/*' },
           signal: abort.signal
         });

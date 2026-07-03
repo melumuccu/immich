@@ -10,7 +10,7 @@ export async function GET({ params }) {
       ? {
           body: await convertHeicToJpeg(original.body),
           contentType: 'image/jpeg',
-          cacheControl: original.cacheControl,
+          cacheControl: 'private, no-cache, max-age=0',
           etag: null
         }
       : original;

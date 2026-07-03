@@ -11,9 +11,11 @@ const HEIF_BRANDS = new Set([
   'hevs'
 ]);
 
+const HEIC_CONTENT_TYPES = new Set(['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence']);
+
 export function isHeicImage(contentType: string, body: ArrayBuffer | Uint8Array): boolean {
   const normalizedContentType = contentType.toLowerCase().split(';', 1)[0]?.trim();
-  if (normalizedContentType === 'image/heic' || normalizedContentType === 'image/heif') {
+  if (normalizedContentType && HEIC_CONTENT_TYPES.has(normalizedContentType)) {
     return true;
   }
 
