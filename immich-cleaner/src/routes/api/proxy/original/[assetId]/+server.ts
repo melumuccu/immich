@@ -1,20 +1,29 @@
 import { getCleanerConfig } from '$lib/server/config';
 import { fetchImmichOriginal } from '$lib/server/immich';
 import { jsonFailure } from '$lib/server/response';
+import { convertHeicToJpeg, isHeicImage } from '$lib/server/image-conversion';
 
 export async function GET({ params }) {
   try {
     const original = await fetchImmichOriginal(getCleanerConfig(), params.assetId);
+    const image = isHeicImage(original.contentType, original.body)
+      ? {
+          body: await convertHeicToJpeg(original.body),
+          contentType: 'image/jpeg',
+          cacheControl: original.cacheControl,
+          etag: null
+        }
+      : original;
     const headers = new Headers({
-      'content-type': original.contentType,
-      'cache-control': original.cacheControl ?? 'private, max-age=60'
+      'content-type': image.contentType,
+      'cache-control': image.cacheControl ?? 'private, max-age=60'
     });
 
-    if (original.etag) {
-      headers.set('etag', original.etag);
+    if (image.etag) {
+      headers.set('etag', image.etag);
     }
 
-    return new Response(original.body, { headers });
+    return new Response(image.body, { headers });
   } catch (error) {
     return jsonFailure(error);
   }

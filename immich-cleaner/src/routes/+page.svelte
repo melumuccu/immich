@@ -450,7 +450,17 @@
     const image = new Image();
     image.decoding = 'async';
     image.src = src;
-    await image.decode();
+    let timeoutId = 0;
+    try {
+      await Promise.race([
+        image.decode(),
+        new Promise<never>((_, reject) => {
+          timeoutId = window.setTimeout(() => reject(new Error('画像のデコードがタイムアウトしました')), 15000);
+        })
+      ]);
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
   }
 
   function openAssetPreview(asset: CleanerAsset) {

@@ -8,7 +8,10 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
 
-RUN corepack enable
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends imagemagick \
+  && rm -rf /var/lib/apt/lists/* \
+  && corepack enable
 WORKDIR /workspace
 
 #============================
@@ -56,7 +59,7 @@ CMD ["pnpm", "exec", "vite", "dev", "--host", "0.0.0.0", "--port", "2222"]
 #============================
 # Runtime Layer
 #============================
-FROM node:24-slim AS runtime
+FROM base AS runtime
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
