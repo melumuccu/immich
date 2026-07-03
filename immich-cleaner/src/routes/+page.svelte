@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { formatScore } from '$lib/score';
 
   type CleanerAsset = {
@@ -8,6 +8,7 @@
     originalFileName: string | null;
     originalPath: string | null;
     thumbnailUrl: string;
+    originalUrl: string;
     isExcluded: boolean;
     exclusionReason: 'manual' | 'rescued' | null;
   };
@@ -28,6 +29,30 @@
     presets: string[];
     defaultSearchSize: number;
     trashMethod: string;
+  };
+
+  type OriginalImageState =
+    | {
+        status: 'loading';
+        promise: Promise<void>;
+        abort: AbortController;
+      }
+    | {
+        status: 'loaded';
+        url: string;
+      }
+    | {
+        status: 'error';
+        message: string;
+      };
+
+  type ViewTransitionHandle = {
+    finished: Promise<void>;
+    skipTransition: () => void;
+  };
+
+  type ViewTransitionDocument = Document & {
+    startViewTransition?: (updateCallback: () => void | Promise<void>) => ViewTransitionHandle;
   };
 
   const now = new Date();
@@ -57,6 +82,12 @@
   let noticeMessage = '';
   let selectedAssetIds = new Set<string>();
   let thresholdValue: number | null = null;
+  let previewAsset: CleanerAsset | null = null;
+  let transitionAssetId: string | null = null;
+  let originalImages = new Map<string, OriginalImageState>();
+  let resultAssetIdsKey = '';
+  let activePreviewTransition: ViewTransitionHandle | null = null;
+  let previewTransitionToken: symbol | null = null;
   let contextMenu:
     | {
         visible: true;
@@ -77,6 +108,13 @@
   $: pageInput = String(currentPage);
   $: selectedCount = selectedAssetIds.size;
   $: thresholdValue = parseThresholdInput(threshold);
+  $: {
+    const nextAssetIdsKey = result?.items.map((asset) => asset.id).join('\u0000') ?? '';
+    if (nextAssetIdsKey !== resultAssetIdsKey) {
+      resultAssetIdsKey = nextAssetIdsKey;
+      pruneOriginalImageStates(new Set(result?.items.map((asset) => asset.id) ?? []));
+    }
+  }
 
   onMount(async () => {
     try {
@@ -98,6 +136,12 @@
     }
   });
 
+  onDestroy(() => {
+    for (const state of originalImages.values()) {
+      releaseOriginalImageState(state);
+    }
+  });
+
   async function runSearch(nextQuery = query, nextPage = 1) {
     const normalizedQuery = nextQuery.trim();
     if (!normalizedQuery) {
@@ -114,6 +158,7 @@
     errorMessage = '';
     noticeMessage = '';
     closeContextMenu();
+    closeAssetPreview({ animated: false });
 
     try {
       result = await requestJson<SearchPage>('/api/search/smart', {
@@ -287,6 +332,222 @@
     contextMenu = { visible: false, x: 0, y: 0, asset: null };
   }
 
+  function prefetchOriginalWhenVisible(node: HTMLElement, asset: CleanerAsset) {
+    let currentAsset = asset;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      return {
+        update(nextAsset: CleanerAsset) {
+          currentAsset = nextAsset;
+        }
+      };
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void prefetchOriginalImage(currentAsset);
+          observer.unobserve(node);
+        }
+      },
+      { threshold: 0.01 }
+    );
+    observer.observe(node);
+
+    return {
+      update(nextAsset: CleanerAsset) {
+        if (nextAsset.id === currentAsset.id) {
+          currentAsset = nextAsset;
+          return;
+        }
+        currentAsset = nextAsset;
+        observer.unobserve(node);
+        observer.observe(node);
+      },
+      destroy() {
+        observer.disconnect();
+      }
+    };
+  }
+
+  function prefetchOriginalImage(asset: CleanerAsset): Promise<void> {
+    const currentState = originalImages.get(asset.id);
+    if (currentState?.status === 'loaded') {
+      return Promise.resolve();
+    }
+    if (currentState?.status === 'loading') {
+      return currentState.promise;
+    }
+
+    const abort = new AbortController();
+    const promise = (async () => {
+      try {
+        const response = await fetch(asset.originalUrl, {
+          headers: { accept: 'image/*' },
+          signal: abort.signal
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const blobUrl = URL.createObjectURL(await response.blob());
+        try {
+          await decodeImage(blobUrl);
+        } catch (error) {
+          URL.revokeObjectURL(blobUrl);
+          throw error;
+        }
+        setOriginalImageState(asset.id, { status: 'loaded', url: blobUrl });
+      } catch (error) {
+        if (abort.signal.aborted) {
+          return;
+        }
+        setOriginalImageState(asset.id, {
+          status: 'error',
+          message: error instanceof Error ? error.message : '元画像を読み込めませんでした'
+        });
+      }
+    })();
+
+    setOriginalImageState(asset.id, { status: 'loading', promise, abort });
+    return promise;
+  }
+
+  function setOriginalImageState(assetId: string, state: OriginalImageState) {
+    const previousState = originalImages.get(assetId);
+    if (previousState?.status === 'loaded' && previousState.url !== (state.status === 'loaded' ? state.url : null)) {
+      URL.revokeObjectURL(previousState.url);
+    }
+    originalImages = new Map(originalImages).set(assetId, state);
+  }
+
+  function getOriginalImageState(assetId: string) {
+    return originalImages.get(assetId) ?? null;
+  }
+
+  function pruneOriginalImageStates(keepAssetIds: Set<string>) {
+    const nextImages = new Map(originalImages);
+    for (const [assetId, state] of nextImages) {
+      if (!keepAssetIds.has(assetId)) {
+        releaseOriginalImageState(state);
+        nextImages.delete(assetId);
+      }
+    }
+    originalImages = nextImages;
+  }
+
+  function releaseOriginalImageState(state: OriginalImageState) {
+    if (state.status === 'loading') {
+      state.abort.abort();
+      return;
+    }
+    if (state.status === 'loaded') {
+      URL.revokeObjectURL(state.url);
+    }
+  }
+
+  async function decodeImage(src: string) {
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = src;
+    await image.decode();
+  }
+
+  function openAssetPreview(asset: CleanerAsset) {
+    closeContextMenu();
+    void prefetchOriginalImage(asset);
+    if (previewAsset?.id === asset.id) {
+      return;
+    }
+    void runPreviewTransition(asset.id, () => {
+      previewAsset = asset;
+    });
+  }
+
+  function closeAssetPreview(options: { animated: boolean } = { animated: true }) {
+    if (!previewAsset) {
+      return;
+    }
+
+    const assetId = previewAsset.id;
+    if (!options.animated) {
+      activePreviewTransition?.skipTransition();
+      activePreviewTransition = null;
+      previewTransitionToken = null;
+      transitionAssetId = null;
+      previewAsset = null;
+      return;
+    }
+
+    void runPreviewTransition(assetId, () => {
+      previewAsset = null;
+    });
+  }
+
+  async function runPreviewTransition(assetId: string, updatePreview: () => void) {
+    activePreviewTransition?.skipTransition();
+    const token = Symbol(assetId);
+    previewTransitionToken = token;
+    transitionAssetId = assetId;
+    await tick();
+
+    const viewTransitionDocument = document as ViewTransitionDocument;
+    if (!canUsePreviewTransition(viewTransitionDocument)) {
+      updatePreview();
+      await tick();
+      clearPreviewTransition(token);
+      return;
+    }
+
+    const transition = viewTransitionDocument.startViewTransition!(async () => {
+      updatePreview();
+      await tick();
+    });
+    activePreviewTransition = transition;
+
+    try {
+      await transition.finished;
+    } catch {
+      // Interrupted transitions are expected during fast repeated preview actions.
+    } finally {
+      clearPreviewTransition(token);
+    }
+  }
+
+  function clearPreviewTransition(token: symbol) {
+    if (previewTransitionToken !== token) {
+      return;
+    }
+    previewTransitionToken = null;
+    transitionAssetId = null;
+    activePreviewTransition = null;
+  }
+
+  function canUsePreviewTransition(viewTransitionDocument: ViewTransitionDocument) {
+    return Boolean(viewTransitionDocument.startViewTransition) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function getPreviewTransitionName(assetId: string) {
+    return `asset-preview-${assetId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  }
+
+  function getThumbnailTransitionStyle(assetId: string) {
+    if (transitionAssetId === assetId && !previewAsset) {
+      return `view-transition-name: ${getPreviewTransitionName(assetId)};`;
+    }
+    return '';
+  }
+
+  function getPreviewImageSrc(asset: CleanerAsset, state: OriginalImageState | null) {
+    return state?.status === 'loaded' ? state.url : asset.thumbnailUrl;
+  }
+
+  function retryOriginalImage(asset: CleanerAsset | null) {
+    if (asset) {
+      void prefetchOriginalImage(asset);
+    }
+  }
+
   async function toggleExclusion() {
     if (!contextMenu.visible) {
       return;
@@ -308,6 +569,11 @@
 
   function handleWindowKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
+      if (previewAsset) {
+        event.preventDefault();
+        closeAssetPreview();
+        return;
+      }
       closeContextMenu();
     }
   }
@@ -489,8 +755,21 @@
                 on:change={(event) => toggleAssetSelection(asset.id, event.currentTarget.checked)}
               />
             </label>
-            <div class="thumb-wrap">
-              <img loading="lazy" src={asset.thumbnailUrl} alt={asset.originalFileName ?? asset.id} />
+            <div class="thumb-wrap" use:prefetchOriginalWhenVisible={asset}>
+              <button
+                class="thumb-button"
+                type="button"
+                aria-label={`${asset.originalFileName ?? asset.id} を拡大表示`}
+                on:click={() => openAssetPreview(asset)}
+              >
+                <img
+                  class="thumb-image"
+                  loading="lazy"
+                  src={asset.thumbnailUrl}
+                  alt={asset.originalFileName ?? asset.id}
+                  style={getThumbnailTransitionStyle(asset.id)}
+                />
+              </button>
               {#if asset.isExcluded}
                 <span class="badge thumb-badge">フィルタリング対象外</span>
               {/if}
@@ -529,6 +808,48 @@
     >
       <button type="button" role="menuitem" on:click={toggleExclusion}>
         {contextMenu.asset.isExcluded ? '対象に戻す' : 'フィルタリング対象外に設定'}
+      </button>
+    </div>
+  {/if}
+
+  {#if previewAsset}
+    {@const previewState = getOriginalImageState(previewAsset.id)}
+    <div
+      class="image-preview"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${previewAsset.originalFileName ?? previewAsset.id} の拡大表示`}
+    >
+      <button
+        class="preview-backdrop"
+        type="button"
+        aria-label="拡大表示を閉じる"
+        on:click={() => closeAssetPreview()}
+      ></button>
+      <figure class="preview-figure">
+        <div class="preview-media">
+          <img
+            class:uses-placeholder={previewState?.status !== 'loaded'}
+            class="preview-image"
+            src={getPreviewImageSrc(previewAsset, previewState)}
+            alt={previewAsset.originalFileName ?? previewAsset.id}
+            style={`view-transition-name: ${getPreviewTransitionName(previewAsset.id)};`}
+          />
+          {#if !previewState || previewState.status === 'loading'}
+            <div class="preview-state" aria-label="元画像を読み込み中" aria-live="polite">
+              <span class="loading-icon" aria-hidden="true"></span>
+            </div>
+          {:else if previewState.status === 'error'}
+            <div class="preview-state is-error" aria-live="polite">
+              <span>元画像を読み込めませんでした</span>
+              <button type="button" on:click={() => retryOriginalImage(previewAsset)}>再試行</button>
+            </div>
+          {/if}
+        </div>
+        <figcaption class="preview-caption">{previewAsset.originalFileName ?? previewAsset.id}</figcaption>
+      </figure>
+      <button class="preview-close" type="button" aria-label="拡大表示を閉じる" on:click={() => closeAssetPreview()}>
+        &times;
       </button>
     </div>
   {/if}

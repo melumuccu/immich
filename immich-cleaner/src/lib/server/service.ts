@@ -39,6 +39,7 @@ export async function searchCleanerAssets(input: {
     return {
       ...asset,
       thumbnailUrl: `/api/proxy/thumbnail/${encodeURIComponent(asset.id)}`,
+      originalUrl: `/api/proxy/original/${encodeURIComponent(asset.id)}`,
       isExcluded: Boolean(exclusion),
       exclusionReason: exclusion?.reason ?? null
     };

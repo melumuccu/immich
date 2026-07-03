@@ -18,10 +18,30 @@
   --shadow-soft: 0 14px 32px rgb(30 41 59 / 0.08);
   --top-bar-size: 68px;
   --side-size: 292px;
+  --ease--out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease--in-out-quint: cubic-bezier(0.86, 0, 0.07, 1);
 }
 
 :where(html, body) {
   overflow-x: clip;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-group(*) {
+    animation-duration: 260ms;
+    animation-timing-function: var(--ease--in-out-quint);
+  }
+
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 260ms;
+    animation-timing-function: var(--ease--out-quint);
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0ms;
+  }
 }
 
 :where(*, *::before, *::after) {
@@ -288,10 +308,31 @@
   background: #dce3de;
 }
 
+.thumb-button {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: clip;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.thumb-button:active .thumb-image {
+  scale: 0.99;
+}
+
 .thumb-wrap img {
+  display: block;
   inline-size: 100%;
   block-size: 100%;
   object-fit: cover;
+}
+
+.thumb-image {
+  transition: scale 160ms var(--ease--out-quint);
 }
 
 .asset-body {
@@ -360,6 +401,7 @@
   inset-block-start: 8px;
   inset-inline-start: 8px;
   max-inline-size: calc(100% - 16px);
+  pointer-events: none;
   box-shadow: 0 6px 14px rgb(0 0 0 / 0.14);
 }
 
@@ -385,6 +427,150 @@
 
 .context-menu button:hover {
   background: #eef6f3;
+}
+
+.image-preview {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 4svi, 48px);
+  isolation: isolate;
+}
+
+.preview-backdrop {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgb(10 16 14 / 0.78);
+  cursor: zoom-out;
+}
+
+.preview-figure {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 10px;
+  inline-size: fit-content;
+  max-inline-size: min(96svi, 1400px);
+  max-block-size: calc(100svb - 40px);
+  justify-items: center;
+  margin: 0;
+  color: #fff;
+}
+
+.preview-media {
+  position: relative;
+  display: grid;
+  place-items: center;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  max-block-size: min(82svb, 900px);
+  overflow: clip;
+  border-radius: 8px;
+  background: #101614;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.34);
+}
+
+.preview-image {
+  display: block;
+  inline-size: auto;
+  block-size: auto;
+  max-inline-size: min(96svi, 1400px);
+  max-block-size: min(82svb, 900px);
+  object-fit: contain;
+}
+
+.preview-image.uses-placeholder {
+  opacity: 0.78;
+}
+
+.preview-state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(10 16 14 / 0.2);
+  color: #fff;
+  pointer-events: none;
+}
+
+.preview-state.is-error {
+  gap: 12px;
+  background: rgb(10 16 14 / 0.68);
+  font-weight: 700;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.preview-state.is-error button {
+  min-block-size: 38px;
+  padding-inline: 12px;
+  border-color: rgb(255 255 255 / 0.34);
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+  font-weight: 700;
+}
+
+.loading-icon {
+  inline-size: 44px;
+  block-size: 44px;
+  border: 4px solid rgb(255 255 255 / 0.32);
+  border-block-start-color: #fff;
+  border-radius: 50%;
+  animation: --preview--spin 800ms linear infinite;
+}
+
+.preview-caption {
+  overflow: hidden;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  color: rgb(255 255 255 / 0.9);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.46);
+  white-space: nowrap;
+}
+
+.preview-close {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 16px;
+  inset-inline-end: 16px;
+  display: grid;
+  place-items: center;
+  inline-size: 44px;
+  block-size: 44px;
+  padding: 0;
+  border-color: rgb(255 255 255 / 0.34);
+  border-radius: 999px;
+  background: rgb(10 16 14 / 0.64);
+  color: #fff;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+@keyframes --preview--spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+@media (any-hover: hover) {
+  .thumb-button:enabled:hover .thumb-image {
+    scale: 1.025;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thumb-image {
+    transition-duration: 1ms;
+  }
 }
 
 .empty-state,
@@ -521,5 +707,24 @@
 
   .status-row {
     grid-template-columns: 1fr;
+  }
+
+  .preview-figure {
+    max-inline-size: 100%;
+    max-block-size: calc(100svb - 32px);
+  }
+
+  .preview-media {
+    max-block-size: min(76svb, 720px);
+  }
+
+  .preview-image {
+    max-inline-size: 100%;
+    max-block-size: min(76svb, 720px);
+  }
+
+  .preview-close {
+    inset-block-start: 12px;
+    inset-inline-end: 12px;
   }
 }

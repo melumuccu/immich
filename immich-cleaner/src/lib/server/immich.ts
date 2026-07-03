@@ -5,7 +5,7 @@ import type { SmartSearchAsset } from './types';
 
 type JsonRecord = Record<string, unknown>;
 
-export type ThumbnailResponse = {
+export type AssetImageResponse = {
   body: ArrayBuffer;
   contentType: string;
   cacheControl: string | null;
@@ -47,8 +47,21 @@ export async function fetchImmichThumbnail(
   config: CleanerConfig,
   assetId: string,
   params: URLSearchParams
-): Promise<ThumbnailResponse> {
-  const url = buildImmichApiUrl(config, `${config.assetsPath}/${encodeURIComponent(assetId)}/thumbnail`);
+): Promise<AssetImageResponse> {
+  return fetchImmichAssetImage(config, assetId, 'thumbnail', params);
+}
+
+export async function fetchImmichOriginal(config: CleanerConfig, assetId: string): Promise<AssetImageResponse> {
+  return fetchImmichAssetImage(config, assetId, 'original', new URLSearchParams());
+}
+
+async function fetchImmichAssetImage(
+  config: CleanerConfig,
+  assetId: string,
+  variant: 'thumbnail' | 'original',
+  params: URLSearchParams
+): Promise<AssetImageResponse> {
+  const url = buildImmichApiUrl(config, `${config.assetsPath}/${encodeURIComponent(assetId)}/${variant}`);
   for (const [key, value] of params) {
     url.searchParams.set(key, value);
   }

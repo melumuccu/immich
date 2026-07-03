@@ -17,6 +17,7 @@ export type SmartSearchAsset = {
 
 export type CleanerAsset = SmartSearchAsset & {
   thumbnailUrl: string;
+  originalUrl: string;
   isExcluded: boolean;
   exclusionReason: ExclusionReason | null;
 };
