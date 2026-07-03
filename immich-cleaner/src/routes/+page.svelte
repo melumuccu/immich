@@ -69,7 +69,7 @@
   let customQuery = '';
   let pageInput = '1';
   let pageSize = 100;
-  let threshold = '';
+  let threshold: string | number | undefined = undefined;
   let includeExcluded = false;
   let selectedYear = defaultYear;
   let selectedMonth = defaultMonth;
@@ -151,7 +151,7 @@
 
     if (normalizedQuery !== query) {
       selectedAssetIds = new Set();
-      threshold = '';
+      threshold = undefined;
     }
     query = normalizedQuery;
     loading = true;
@@ -589,12 +589,12 @@
     }
   }
 
-  function parseThresholdInput(value: string): number | null {
-    if (!value.trim()) {
+  function parseThresholdInput(value: string | number | undefined): number | null {
+    if (value === undefined || value === '') {
       return null;
     }
 
-    const parsed = Number.parseFloat(value);
+    const parsed = typeof value === 'number' ? value : Number.parseFloat(value);
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
       return null;
     }
