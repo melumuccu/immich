@@ -38,6 +38,12 @@ Mac Studio 上で Immich を動かすための最小構成。保存先はハイ�
   mise run hooks-run
   ```
 
+- pre-push hook を個別に確認したい場合
+
+  ```bash
+  pre-commit run gitleaks-pre-push --hook-stage pre-push
+  ```
+
 - [こちらを参照](docs/setup.md): `.env` の調整から起動まで
 
 ### 完全リセット

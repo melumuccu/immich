@@ -29,12 +29,18 @@ description = "Docker Compose の全コンテナを停止し、再ビルドし�
 run = "docker compose stop && docker compose rm -f && docker compose up -d --build"
 
 [tasks.hooks-validate]
-description = "pre-commit 設定ファイルを検証する"
-run = "pre-commit validate-config"
+description = "pre-commit 設定ファイルと pre-push hook を検証する"
+run = """
+pre-commit validate-config
+pre-commit run --hook-stage pre-push
+"""
 
 [tasks.hooks-install]
-description = "pre-commit hook を Git hooks にインストールする"
-run = "pre-commit install"
+description = "pre-commit / pre-push hook を Git hooks にインストールする"
+run = """
+pre-commit install
+pre-commit install --hook-type pre-push
+"""
 
 [tasks.hooks-run]
 description = "gitleaks で Git 管理下の内容をスキャンする"
