@@ -183,6 +183,22 @@ services:
     ports:
       - "${IMMICH_CLEANER_MIE_PORT:-2294}:2222"
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-immich
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --protocol
+      - http2 # =TCP (長期接続前提のため、UDPセッション切れを根本から回避する狙い)
+      - run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      immich-server:
+        condition: service_started
+    restart: unless-stopped
+
   # smart-ranker:
   #   container_name: smart_ranker
   #   build:
