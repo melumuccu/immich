@@ -1,6 +1,6 @@
-import { getCleanerConfig } from '$lib/server/config';
-import { fetchImmichThumbnail } from '$lib/server/immich';
-import { jsonFailure } from '$lib/server/response';
+import { getCleanerConfig } from '#lib/server/config';
+import { fetchImmichThumbnail } from '#lib/server/immich';
+import { jsonFailure } from '#lib/server/response';
 
 export async function GET({ params, url }) {
   try {

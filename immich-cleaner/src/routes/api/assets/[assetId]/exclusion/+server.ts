@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 
-import { jsonFailure } from '$lib/server/response';
-import { clearAssetExclusion, setAssetExclusion } from '$lib/server/service';
+import { jsonFailure } from '#lib/server/response';
+import { clearAssetExclusion, setAssetExclusion } from '#lib/server/service';
 
 export function PUT({ params }) {
   try {

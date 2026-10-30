@@ -4,7 +4,7 @@ import { parseTakenDateFilter } from './date-filter';
 import { HttpError } from './errors';
 import { searchSmartAssets, trashImmichAssets } from './immich';
 import type { CleanerAsset, SearchPage, SmartSearchAsset, TrashResult } from './types';
-import { scoreForThreshold } from '$lib/score';
+import { scoreForThreshold } from '#lib/score';
 
 const SEARCH_CACHE_MS = 5 * 60 * 1000;
 const ORIGINAL_DISPLAY_FORMAT_VERSION = 'jpeg-v1';
