@@ -1,5 +1,3 @@
-import { env } from '$env/dynamic/private';
-
 export const DEFAULT_KEYWORD_PRESETS = [
   'screenshot',
   'document',
@@ -24,7 +22,7 @@ type EnvSource = Record<string, string | undefined>;
 
 const DEFAULT_DB_PATH = '/app/data/immich-cleaner.sqlite3';
 
-export function getCleanerConfig(envSource: EnvSource = env): CleanerConfig {
+export function getCleanerConfig(envSource: EnvSource = process.env): CleanerConfig {
   const immichUrl = readRequired(envSource, 'IMMICH_URL').replace(/\/+$/, '');
   const immichApiKey = readRequired(envSource, 'IMMICH_API_KEY');
   const trashMethod = readText(envSource, 'IMMICH_CLEANER_TRASH_METHOD', 'DELETE').toUpperCase();
@@ -47,7 +45,7 @@ export function getCleanerConfig(envSource: EnvSource = env): CleanerConfig {
   };
 }
 
-export function getPublicConfig(envSource: EnvSource = env) {
+export function getPublicConfig(envSource: EnvSource = process.env) {
   return {
     configured: Boolean(envSource.IMMICH_URL && envSource.IMMICH_API_KEY),
     presets: DEFAULT_KEYWORD_PRESETS,
