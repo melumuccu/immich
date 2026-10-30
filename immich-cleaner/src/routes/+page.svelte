@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
-  import { formatScore } from '$lib/score';
+  import { formatScore } from '#lib/score';
 
   type CleanerAsset = {
     id: string;

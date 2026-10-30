@@ -3,15 +3,18 @@
     "kiso.css": "^1.2.4"
   },
   "devDependencies": {
-    "@sveltejs/adapter-node": "^5.2.13",
-    "@sveltejs/kit": "^2.43.1",
-    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@sveltejs/adapter-node": "^6.0.0",
+    "@sveltejs/kit": "^3.0.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/node": "^24.10.1",
-    "svelte": "^5.45.6",
+    "svelte": "^5.57.1",
     "svelte-check": "^4.3.4",
-    "typescript": "^5.9.3",
-    "vite": "^7.2.6",
-    "vitest": "^4.0.15"
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5",
+    "vitest": "^4.1.11"
+  },
+  "imports": {
+    "#lib/*": "./src/lib/*"
   },
   "name": "immich-cleaner",
   "packageManager": "pnpm@10.14.0",

@@ -1,7 +1,7 @@
-import { getCleanerConfig } from '$lib/server/config';
-import { fetchImmichOriginal, fetchImmichThumbnail, type AssetImageResponse } from '$lib/server/immich';
-import { jsonFailure } from '$lib/server/response';
-import { convertHeicToJpeg, isHeicImage } from '$lib/server/image-conversion';
+import { getCleanerConfig } from '#lib/server/config';
+import { fetchImmichOriginal, fetchImmichThumbnail, type AssetImageResponse } from '#lib/server/immich';
+import { jsonFailure } from '#lib/server/response';
+import { convertHeicToJpeg, isHeicImage } from '#lib/server/image-conversion';
 
 export async function GET({ params }) {
   try {

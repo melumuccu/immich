@@ -1,1 +1,0 @@
-"""Smart Ranker web package."""
